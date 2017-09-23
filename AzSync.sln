@@ -3,7 +3,18 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26730.3
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AzSync", "AzSync\AzSync.csproj", "{448799CC-1236-4E72-9935-6612766C30FF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AzSync", "AzSync\AzSync.csproj", "{448799CC-1236-4E72-9935-6612766C30FF}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AzSync.CLI", "AzSync.CLI\AzSync.CLI.csproj", "{DC074779-883A-4A56-9B59-5BDBCF1FB05E}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Octodiff", "Octodiff\source\Octodiff\Octodiff.csproj", "{31CC1034-B982-437F-B89B-57AD303009FD}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AzSync.Tests", "AzSync.Tests\AzSync.Tests.csproj", "{186BFD2F-8EC0-48EE-8F55-02144B1FE342}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{910F4DAE-3D60-45DD-848B-79229D57BC09}"
+	ProjectSection(SolutionItems) = preProject
+		azsync.cmd = azsync.cmd
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +26,18 @@ Global
 		{448799CC-1236-4E72-9935-6612766C30FF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{448799CC-1236-4E72-9935-6612766C30FF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{448799CC-1236-4E72-9935-6612766C30FF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DC074779-883A-4A56-9B59-5BDBCF1FB05E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC074779-883A-4A56-9B59-5BDBCF1FB05E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC074779-883A-4A56-9B59-5BDBCF1FB05E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC074779-883A-4A56-9B59-5BDBCF1FB05E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{31CC1034-B982-437F-B89B-57AD303009FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{31CC1034-B982-437F-B89B-57AD303009FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{31CC1034-B982-437F-B89B-57AD303009FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{31CC1034-B982-437F-B89B-57AD303009FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
