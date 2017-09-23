@@ -17,24 +17,26 @@ namespace AzSync
     using SerilogTimings;
     using SerilogTimings.Extensions;
   
-    /// <summary>
-    /// A helper class provides convenient operations against storage account configured in the App.config.
-    /// </summary>
     public class AzStorage : ILogging
     {
         #region Constructors
         public AzStorage(string connString)
         {
-            this.connectionString = connString;
+            this.ConnectionString = connString;
+            GetStorageAccount();
+            if (this.StorageAccount != null)
+            {
+                this.Initialised = true;
+            }
         }
         #endregion
         
-        #region Fields
-        private Logger<AzStorage> L = new Logger<AzStorage>();
-        private string connectionString;
-        private CloudStorageAccount storageAccount;
-        private CloudBlobClient blobClient;
-        private CloudFileClient fileClient;
+        #region Properties
+        public string ConnectionString { get; protected set; }
+        public CloudStorageAccount StorageAccount { get; protected set; }
+        public CloudBlobClient BlobClient { get; protected set; }
+        public CloudFileClient FileClient { get; protected set; }
+        public bool Initialised { get; protected set; } = false;
         #endregion
 
         #region Methods
@@ -196,41 +198,45 @@ namespace AzSync
 
         private CloudBlobClient GetCloudBlobClient()
         {
-            if (blobClient == null)
+            if (BlobClient == null)
             {
-                blobClient = GetStorageAccount().CreateCloudBlobClient();
+                BlobClient = GetStorageAccount().CreateCloudBlobClient();
             }
 
-            return blobClient;
+            return BlobClient;
         }
 
         private CloudFileClient GetCloudFileClient()
         {
-            if (fileClient == null)
+            if (FileClient == null)
             {
-                fileClient = GetStorageAccount().CreateCloudFileClient();
+                FileClient = GetStorageAccount().CreateCloudFileClient();
             }
 
-            return fileClient;
+            return FileClient;
         }
 
         private CloudStorageAccount GetStorageAccount()
         {
             try
             {
-                if (storageAccount == null)
+                if (StorageAccount == null)
                 {
-                    storageAccount = CloudStorageAccount.Parse(connectionString);
+                    StorageAccount = CloudStorageAccount.Parse(ConnectionString);
                 }
 
-                return storageAccount;
+                return StorageAccount;
             }
             catch (Exception e)
             {
-                L.Error(e, "Exception throw parsing Azure connection string {cs}.", connectionString);
+                L.Error(e, "Exception throw parsing Azure connection string {cs}.", ConnectionString);
                 return null;
             }
         }
+        #endregion
+
+        #region Fields
+        private Logger<AzStorage> L = new Logger<AzStorage>();
         #endregion
     }
 }

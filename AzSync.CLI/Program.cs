@@ -261,14 +261,18 @@ namespace AzSync.CLI
                         engineOp.Complete();
                     }
                 }
-                if (await Engine.Sync())
+                using (Operation engineOp = L.Begin("Azure Storage {up}", EngineOptions["OperationType"]))
                 {
-                    programOp.Complete();
-                    Exit(ExitResult.SUCCESS);
-                }
-                else
-                {
-                    Exit(ExitResult.SYNC_ERROR);
+                    if (await Engine.Sync())
+                    {
+                        engineOp.Complete();
+                        programOp.Complete();
+                        Exit(ExitResult.SUCCESS);
+                    }
+                    else
+                    {
+                        Exit(ExitResult.SYNC_ERROR);
+                    }
                 }
             }
         }

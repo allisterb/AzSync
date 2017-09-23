@@ -93,9 +93,17 @@ namespace AzSync
                 {
                     DestinationStorage = new AzStorage(cs);
                 }
+                if (DestinationStorage.Initialised)
+                {
+                    Initialised = true;
+                }
+                else
+                {
+                    Initialised = false;
+                }
 
             }
-            Initialised = true;
+            
         }
         #endregion
 
@@ -124,18 +132,12 @@ namespace AzSync
         #region Methods
         public async Task<bool> Sync()
         {
-            bool result = false;
-            using (Operation engineOp = L.Begin("Upload"))
+            switch (this.Operation)
             {
-                if (result = await Upload())
-                {
-                    engineOp.Complete();
-                }
-                else
-                {
-                    engineOp.Cancel();
-                }
-                return result;
+                case OperationType.UPLOAD:    
+                    return await Upload();
+                default:
+                    throw new NotImplementedException();
             }
         }
 
