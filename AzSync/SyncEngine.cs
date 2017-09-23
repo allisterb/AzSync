@@ -45,6 +45,14 @@ namespace AzSync
             {
                 SourceKey = (string)EngineOptions["SourceKey"];
             }
+            if (EngineOptions.ContainsKey("SourceAccountName"))
+            {
+                SourceAccountName = (string)EngineOptions["SourceAccountName"];
+            }
+            if (EngineOptions.ContainsKey("SourceContainerName"))
+            {
+                SourceContainerName = (string)EngineOptions["SourceContainerName"];
+            }
             if (EngineOptions.ContainsKey("Destination"))
             {
                 Destination = (string)EngineOptions["Destination"];
@@ -53,11 +61,27 @@ namespace AzSync
             {
                 DestinationKey = (string)EngineOptions["DestinationKey"];
             }
+            if (EngineOptions.ContainsKey("DestinationAccountName"))
+            {
+                DestinationAccountName = (string)EngineOptions["DestinationAccountName"];
+            }
+            if (EngineOptions.ContainsKey("DestinationContainerName"))
+            {
+                DestinationContainerName = (string)EngineOptions["DestinationContainerName"];
+            }
+            if (EngineOptions.ContainsKey("SourceFile"))
+            {
+                SourceFile = (FileInfo)EngineOptions["SourceFile"];
+            }
+            if (EngineOptions.ContainsKey("SourceDirectory"))
+            {
+                SourceDirectory = (DirectoryInfo)EngineOptions["SourceDirectory"];
+            }
             if (this.Operation == OperationType.UPLOAD)
             {
                 Contract.Requires(Operation == OperationType.UPLOAD && !string.IsNullOrEmpty(Source) && !string.IsNullOrEmpty(Destination) 
                     && EngineOptions.ContainsKey("DestinationUri"));
-                Contract.Requires(EngineOptions.ContainsKey("SourceFile") || EngineOptions.ContainsKey("SourceDirectory"));
+                Contract.Requires(EngineOptions.ContainsKey("DestinationKey") && EngineOptions.ContainsKey("DestinationAccountName") && EngineOptions.ContainsKey("DestinationContainerName"));
                 DestinationUri = (Uri)EngineOptions["DestinationUri"];
                 string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(DestinationUri, DestinationKey);
                 if (string.IsNullOrEmpty(cs))
@@ -69,14 +93,7 @@ namespace AzSync
                 {
                     DestinationStorage = new AzStorage(cs);
                 }
-                if (EngineOptions.ContainsKey("SourceFile"))
-                {
-                    SourceFile = (FileInfo)EngineOptions["SourceFile"];
-                }
-                else
-                {
-                    SourceDirectory = (DirectoryInfo)EngineOptions["SourceFile"];
-                }
+
             }
             Initialised = true;
         }
@@ -91,11 +108,15 @@ namespace AzSync
         public string Source { get; protected set; }
         public Uri SourceUri { get; protected set; }
         public string SourceKey { get; protected set; }
+        public string SourceAccountName { get; protected set; }
+        public string SourceContainerName { get; protected set; }
         public FileInfo SourceFile { get; protected set; }
         public DirectoryInfo SourceDirectory { get; protected set; }
         public string Destination { get; protected set; }
         public Uri DestinationUri { get; protected set; }
         public string DestinationKey { get; protected set; }
+        public string DestinationAccountName { get; protected set; }
+        public string DestinationContainerName { get; protected set; }
         public FileInfo DestinationFile { get; protected set; }
         public FileInfo DestinationDirectory { get; protected set; }
         #endregion

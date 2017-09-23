@@ -125,7 +125,7 @@ namespace AzSync.CLI
             .WithParsed((Options o) =>
             {
                 o.Source = string.IsNullOrEmpty(AppConfig["Source"]) ? o.Source : AppConfig["Source"];
-                o.SourceKey = string.IsNullOrEmpty(AppConfig["SourceKey"]) ? o.Source : AppConfig["SourceKey"];
+                o.SourceKey = string.IsNullOrEmpty(AppConfig["SourceKey"]) ? o.SourceKey : AppConfig["SourceKey"];
                 o.Destination = string.IsNullOrEmpty(AppConfig["Destination"]) ? o.Destination : AppConfig["Destination"];
                 o.DestinationKey = string.IsNullOrEmpty(AppConfig["DestKey"]) ? o.DestinationKey : AppConfig["DestKey"];
 
@@ -168,6 +168,7 @@ namespace AzSync.CLI
             })
             .WithParsed((UpOptions o) =>
             {
+                EngineOptions.Add("OperationType", SyncEngine.OperationType.UPLOAD);
                 if (string.IsNullOrEmpty(o.Source) || string.IsNullOrEmpty(o.Destination))
                 {
                     L.Error("You must specify both the source and destination parameters for an upload operation.");
@@ -216,7 +217,6 @@ namespace AzSync.CLI
                     L.Error("You must specify the account key for accessing the destination Azure Storage container.");
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
-                EngineOptions.Add("OperationType", "Upload");
                 Sync().Wait();
             })
             .WithParsed((SyncOptions o) =>
@@ -247,7 +247,7 @@ namespace AzSync.CLI
 
         static async Task Sync()
         {
-            using (Operation programOp = L.Begin("File sync operations"))
+            using (Operation programOp = L.Begin("Azure Storage sync operation"))
             {
                 using (Operation engineOp = L.Begin("Initialising sync engine"))
                 {
