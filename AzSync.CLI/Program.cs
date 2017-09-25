@@ -61,7 +61,7 @@ namespace AzSync.CLI
             Log.Logger = LConfig.CreateLogger();
             L = new Logger<Program>();
 
-            ParserResult<object> result = new Parser().ParseArguments<Options, UpOptions, SyncOptions>(args);
+            ParserResult<object> result = new Parser().ParseArguments<Options, CopyOptions, SyncOptions>(args);
             result.WithNotParsed((IEnumerable<Error> errors) =>
             {
                 if (errors.Any(e => e.Tag == ErrorType.VersionRequestedError))
@@ -98,7 +98,7 @@ namespace AzSync.CLI
                     HelpText help = GetAutoBuiltHelpText(result);
                     help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
                     help.Copyright = string.Empty;
-                    help.AddVerbs(typeof(SyncOptions), typeof(UpOptions));
+                    help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions));
                     L.Info(help);
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
@@ -128,6 +128,7 @@ namespace AzSync.CLI
                 o.SourceKey = string.IsNullOrEmpty(AppConfig["SourceKey"]) ? o.SourceKey : AppConfig["SourceKey"];
                 o.Destination = string.IsNullOrEmpty(AppConfig["Destination"]) ? o.Destination : AppConfig["Destination"];
                 o.DestinationKey = string.IsNullOrEmpty(AppConfig["DestKey"]) ? o.DestinationKey : AppConfig["DestKey"];
+                o.Pattern = string.IsNullOrEmpty(AppConfig["Pattern"]) ? o.Pattern : AppConfig["Pattern"];
 
                 if (o.UseStorageEmulator)
                 {
@@ -144,6 +145,7 @@ namespace AzSync.CLI
                     if (sourceUri.Segments.Length != 3)
                     {
                         L.Error("The Azure endpoint Url for the sync source must be in the format http(s)://{host}/{account_name}/{container_name}");
+                        Exit(ExitResult.INVALID_OPTIONS);
                     }
                     else
                     {
@@ -152,11 +154,44 @@ namespace AzSync.CLI
                         EngineOptions.Add("SourceUri", sourceUri);
                     }
                 }
+                else if (!string.IsNullOrEmpty(o.Source))
+                {
+                    try
+                    {
+                        if (Directory.Exists(o.Source))
+                        {
+                            EngineOptions.Add("SourceDirectory", new DirectoryInfo(o.Source));
+                        }
+                        else
+                        {
+                            L.Error("Could not find local directory {0}.", o.Source);
+                            Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
+                        }
+                    }
+                    catch (IOException ioe)
+                    {
+                        L.Error(ioe, "A storage exception was thrown attempting to find local directory {d}.", o.Source);
+                        Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
+                    }
+                    string[] files = Directory.GetFiles(o.Source, o.Pattern, o.Recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
+                    L.Info("Matched {0} files to pattern {1} in directory {2}.", files.Length, o.Pattern, o.Source);
+                    if (files.Length > 0)
+                    {
+                        EngineOptions.Add("SourceFiles", files);
+                    }
+                    else
+                    {
+                        L.Warn("Nothing to do, exiting.");
+                        Exit(ExitResult.SUCCESS);
+                    }
+                }
+
                 if (!string.IsNullOrEmpty(o.Destination) && (o.Destination.StartsWith("http://") || o.Destination.StartsWith("https://")) && Uri.TryCreate(o.Destination, UriKind.Absolute, out Uri destinationUri))
                 {
                     if (destinationUri.Segments.Length != 3)
                     {
                         L.Error("The Azure endpoint Url for the sync destination must be in the format http(s)://{host}/{account_name}/{container_name}");
+                        Exit(ExitResult.INVALID_OPTIONS);
                     }
                     else
                     {
@@ -166,9 +201,9 @@ namespace AzSync.CLI
                     }
                 }
             })
-            .WithParsed((UpOptions o) =>
+            .WithParsed((CopyOptions o) =>
             {
-                EngineOptions.Add("OperationType", SyncEngine.OperationType.UPLOAD);
+                EngineOptions.Add("OperationType", SyncEngine.OperationType.COPY);
                 if (string.IsNullOrEmpty(o.Source) || string.IsNullOrEmpty(o.Destination))
                 {
                     L.Error("You must specify both the source and destination parameters for an upload operation.");
@@ -183,38 +218,10 @@ namespace AzSync.CLI
                 {
                     L.Error("The destination for an upload operation must be an Azure Storage Blob Service endpoint Url.");
                     Exit(ExitResult.INVALID_OPTIONS);
-                }
-                try
-                {
-                    if (File.Exists(o.Source))
-                    {
-                        EngineOptions.Add("SourceFile", new FileInfo(o.Source));
-                    }
-                    else if (Directory.Exists(o.Source))
-                    {
-                        EngineOptions.Add("SourceDirectory", new DirectoryInfo(o.Source));
-                    }
-                }
-                catch (IOException ioe)
-                {
-                    L.Warn("I/O exception thrown searching for file or directory {s}: {m}.", o.Source, ioe.Message);
-                    Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
-                }
-
-                if (!o.Destination.ToLower().StartsWith("http://") && !o.Destination.ToLower().StartsWith("https://"))
-                {
-                    L.Error("You must specify an Azure Storage endpoint as the destination for an upload operation.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-                else if (!EngineOptions.ContainsKey("DestinationUri"))
-                {
-                    L.Error("The destination Azure Storage endpoint {d} is not a valid Uri.", o.Destination);
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-                
+                } 
                 if (string.IsNullOrEmpty(o.DestinationKey)) 
                 {
-                    L.Error("You must specify the account key for accessing the destination Azure Storage container.");
+                    L.Error("You must specify the account key for accessing the destination Azure Storage location.");
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
                 Sync().Wait();
@@ -261,7 +268,7 @@ namespace AzSync.CLI
                         engineOp.Complete();
                     }
                 }
-                using (Operation engineOp = L.Begin("Azure Storage {up}", EngineOptions["OperationType"]))
+                using (Operation engineOp = L.Begin("Azure Storage {op}", EngineOptions["OperationType"]))
                 {
                     if (await Engine.Sync())
                     {
