@@ -44,6 +44,10 @@ namespace AzSync
             {
                 SourceDirectory = (DirectoryInfo)EngineOptions["SourceDirectory"];
             }
+            if (EngineOptions.ContainsKey("SourceFiles"))
+            {
+                SourceFiles = (string[])EngineOptions["SourceFiles"];
+            }
             if (EngineOptions.ContainsKey("SourceKey"))
             {
                 SourceKey = (string)EngineOptions["SourceKey"];
@@ -72,39 +76,69 @@ namespace AzSync
             {
                 DestinationContainerName = (string)EngineOptions["DestinationContainerName"];
             }
-            if (EngineOptions.ContainsKey("SourceFiles"))
+            if (EngineOptions.ContainsKey("DestinationDirectory"))
             {
-                SourceFiles = (string[]) EngineOptions["SourceFiles"];
+                DestinationDirectory = (DirectoryInfo)EngineOptions["DestinationDirectory"];
             }
             Pattern = (string) EngineOptions["Pattern"];
             Recurse = (bool)EngineOptions["Recurse"];
             if (this.Operation == OperationType.COPY)
             {
-                Contract.Requires(Operation == OperationType.COPY && !string.IsNullOrEmpty(Source) && !string.IsNullOrEmpty(Destination) 
-                    && EngineOptions.ContainsKey("DestinationUri"));
-                Contract.Requires(EngineOptions.ContainsKey("DestinationKey") && EngineOptions.ContainsKey("DestinationAccountName") && EngineOptions.ContainsKey("DestinationContainerName"));
-                DestinationUri = (Uri)EngineOptions["DestinationUri"];
-                string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(DestinationUri, DestinationKey);
-                if (string.IsNullOrEmpty(cs))
+                Contract.Requires(!string.IsNullOrEmpty(Source) && !string.IsNullOrEmpty(Destination));
+                Contract.Requires(!(EngineOptions.ContainsKey("SourceUri") && EngineOptions.ContainsKey("DestinationUri")));
+                if (this.EngineOptions.ContainsKey("DestinationUri"))
                 {
-                    L.Error("Could not determine the Azure Storage connection string.");
-                    return;
+                    Contract.Requires(EngineOptions.ContainsKey("DestinationKey") && EngineOptions.ContainsKey("DestinationAccountName") && EngineOptions.ContainsKey("DestinationContainerName"));
+                    Contract.Requires(EngineOptions.ContainsKey("SourceFiles"));
+                    DestinationUri = (Uri)EngineOptions["DestinationUri"];
+                    string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(DestinationUri, DestinationKey);
+                    if (string.IsNullOrEmpty(cs))
+                    {
+                        L.Error("Could not determine the Azure Storage connection string.");
+                        return;
+                    }
+                    else
+                    {
+                        DestinationStorage = new AzStorage(cs);
+                        if (!DestinationStorage.Initialised)
+                        {
+                            L.Error("Could not intialise destination Azure storage.");
+                            Initialised = false;
+                            return;
+                        }
+                        else
+                        {
+                            this.Initialised = true;
+                        }
+                    }
                 }
                 else
                 {
-                    DestinationStorage = new AzStorage(cs);
+                    Contract.Requires(EngineOptions.ContainsKey("SourceKey") && EngineOptions.ContainsKey("SourceAccountName") && EngineOptions.ContainsKey("SourceContainerName"));
+                    Contract.Requires(EngineOptions.ContainsKey("DestinationDirectory"));
+                    SourceUri = (Uri)EngineOptions["SourceUri"];
+                    string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(SourceUri, SourceKey);
+                    if (string.IsNullOrEmpty(cs))
+                    {
+                        L.Error("Could not determine the Azure Storage connection string.");
+                        return;
+                    }
+                    else
+                    {
+                        SourceStorage = new AzStorage(cs);
+                        if (!SourceStorage.Initialised)
+                        {
+                            L.Error("Could not intialise source Azure storage.");
+                            Initialised = false;
+                            return;
+                        }
+                        else
+                        {
+                            Initialised = true;
+                        }
+                    }
                 }
-                if (DestinationStorage.Initialised)
-                {
-                    Initialised = true;
-                }
-                else
-                {
-                    Initialised = false;
-                }
-
             }
-            
         }
         #endregion
 
@@ -150,8 +184,8 @@ namespace AzSync
         {
             UploadDirectoryOptions options = new UploadDirectoryOptions
             {
-                SearchPattern = Source,
-                Recursive = false,
+                SearchPattern = Pattern,
+                Recursive = Recurse,
                 BlobType = BlobType.BlockBlob
             };
             DirectoryTransferContext ctx = new DirectoryTransferContext();

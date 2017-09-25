@@ -115,7 +115,6 @@ namespace AzSync.CLI
                 else
                 {
                     HelpText help = GetAutoBuiltHelpText(result);
-                    help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
                     help.Copyright = string.Empty;
                     L.Error("An error occurred parsing the program options: {errors}.", errors);
                     L.Info(help);
@@ -129,7 +128,7 @@ namespace AzSync.CLI
                 o.Destination = string.IsNullOrEmpty(AppConfig["Destination"]) ? o.Destination : AppConfig["Destination"];
                 o.DestinationKey = string.IsNullOrEmpty(AppConfig["DestKey"]) ? o.DestinationKey : AppConfig["DestKey"];
                 o.Pattern = string.IsNullOrEmpty(AppConfig["Pattern"]) ? o.Pattern : AppConfig["Pattern"];
-
+          
                 if (o.UseStorageEmulator)
                 {
                     o.DestinationKey = @"Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
@@ -200,6 +199,26 @@ namespace AzSync.CLI
                         EngineOptions.Add("DestinationUri", destinationUri);
                     }
                 }
+                else if (!string.IsNullOrEmpty(o.Destination))
+                {
+                    try
+                    {
+                        if (Directory.Exists(o.Destination))
+                        {
+                            EngineOptions.Add("DestinationDirectory", new DirectoryInfo(o.Destination));
+                        }
+                        else
+                        {
+                            L.Error("Could not find local directory {0}.", o.Destination);
+                            Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
+                        }
+                    }
+                    catch (IOException ioe)
+                    {
+                        L.Error(ioe, "A storage exception was thrown attempting to find local directory {d}.", o.Destination);
+                        Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
+                    }
+                }
             })
             .WithParsed((CopyOptions o) =>
             {
@@ -209,21 +228,40 @@ namespace AzSync.CLI
                     L.Error("You must specify both the source and destination parameters for an upload operation.");
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
-                if (o.Source.ToLower().StartsWith("https://") || o.Source.ToLower().StartsWith("http://"))
+                if (EngineOptions.ContainsKey("SourceUri") && EngineOptions.ContainsKey("DestinationUri"))
                 {
-                    L.Error("You must specify a local file or directory path as the source for an upload operation.");
+                    L.Error("You must specify a local file or directory path and an Azure Storage location as the source/destination for an upload operation.");
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
-                if (!EngineOptions.ContainsKey("DestinationUri") || !EngineOptions.ContainsKey("DestinationAccountName") || !EngineOptions.ContainsKey("DestinationContainerName"))
+
+                if (!EngineOptions.ContainsKey("SourceUri") && EngineOptions.ContainsKey("SourceFiles"))
                 {
-                    L.Error("The destination for an upload operation must be an Azure Storage Blob Service endpoint Url.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                } 
-                if (string.IsNullOrEmpty(o.DestinationKey)) 
-                {
-                    L.Error("You must specify the account key for accessing the destination Azure Storage location.");
-                    Exit(ExitResult.INVALID_OPTIONS);
+                    if (!EngineOptions.ContainsKey("DestinationUri") || !EngineOptions.ContainsKey("DestinationAccountName") || !EngineOptions.ContainsKey("DestinationContainerName"))
+                    {
+                        L.Error("The destination for a local filesystem copy operation must be an Azure Storage Blob Service endpoint Url.");
+                        Exit(ExitResult.INVALID_OPTIONS);
+                    }
+                    if (!EngineOptions.ContainsKey("DestinationKey"))
+                    {
+                        L.Error("You must specify the account key for accessing the destination Azure Storage location.");
+                        Exit(ExitResult.INVALID_OPTIONS);
+                    }
+
                 }
+                else if (!EngineOptions.ContainsKey("DestinationUri") && EngineOptions.ContainsKey("DestinationDirectory"))
+                {
+                    if (!EngineOptions.ContainsKey("SourceUri") || !EngineOptions.ContainsKey("SourceAccountName") || !EngineOptions.ContainsKey("SourceContainerName"))
+                    {
+                        L.Error("The source for an Azure Storage copy operation must be an Azure Storage Blob Service endpoint Url.");
+                        Exit(ExitResult.INVALID_OPTIONS);
+                    }
+                    if (!EngineOptions.ContainsKey("SourceKey"))
+                    {
+                        L.Error("You must specify the account key for accessing the source Azure Storage location.");
+                        Exit(ExitResult.INVALID_OPTIONS);
+                    }
+                }
+
                 Sync().Wait();
             })
             .WithParsed((SyncOptions o) =>
