@@ -12,17 +12,20 @@ namespace AzSync
     using Microsoft.WindowsAzure.Storage.Auth;
     using Microsoft.WindowsAzure.Storage.Blob;
     using Microsoft.WindowsAzure.Storage.File;
+    using Microsoft.WindowsAzure.Storage.RetryPolicies;
 
     using Serilog;
     using SerilogTimings;
     using SerilogTimings.Extensions;
-  
+
     public class AzStorage : ILogging
     {
         #region Constructors
-        public AzStorage(string connString)
+        public AzStorage(SyncEngine engine, string connString, bool rethrowExceptions = false)
         {
+            this.Engine = engine;
             this.ConnectionString = connString;
+            this.RethrowExceptions = rethrowExceptions;
             GetStorageAccount();
             if (this.StorageAccount != null)
             {
@@ -30,13 +33,15 @@ namespace AzSync
             }
         }
         #endregion
-        
+
         #region Properties
+        public SyncEngine Engine { get; protected set; }
         public string ConnectionString { get; protected set; }
         public CloudStorageAccount StorageAccount { get; protected set; }
         public CloudBlobClient BlobClient { get; protected set; }
         public CloudFileClient FileClient { get; protected set; }
         public bool Initialised { get; protected set; } = false;
+        public bool RethrowExceptions { get; protected set; }
         #endregion
 
         #region Methods
@@ -59,8 +64,8 @@ namespace AzSync
         /// <param name="blobName">Blob name.</param>
         /// <param name="blobType">Type of blob.</param>
         /// <returns>A <see cref="Task{T}"/> object of type <see cref="CloudBlob"/> that represents the asynchronous operation.</returns>
-        public async Task<CloudBlob> GetorCreateCloudBlobAsync(string containerName, string blobName, BlobType blobType, DateTimeOffset? snapshotTime)
-        {   using (Operation azOp = L.Begin("Get Azure Storage blob"))
+        public async Task<CloudBlob> GetorCreateCloudBlobAsync(string containerName, string blobName, BlobType blobType, DateTimeOffset? snapshotTime = null)
+        { using (Operation azOp = L.Begin("Get Azure Storage blob {0}/{1}", containerName, blobName))
             {
                 try
                 {
@@ -87,10 +92,29 @@ namespace AzSync
                     azOp.Complete();
                     return cloudBlob;
                 }
+                catch (StorageException se)
+                {
+                    L.Error(se, "Storage exception thrown getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
+                    if (RethrowExceptions)
+                    {
+                        throw se;
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
                 catch (Exception e)
                 {
                     L.Error(e, "Exception thrown getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
-                    return null;
+                    if (RethrowExceptions)
+                    {
+                        throw e;
+                    }
+                    else
+                    {
+                        return null;
+                    }
                 }
             }
 
@@ -115,10 +139,29 @@ namespace AzSync
                     azOp.Complete();
                     return dir;
                 }
+                catch (StorageException se)
+                {
+                    L.Error(se, "Storage exception thrown getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
+                    if (RethrowExceptions)
+                    {
+                        throw se;
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
                 catch (Exception e)
                 {
                     L.Error(e, "Exception thrown getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
-                    return null;
+                    if (RethrowExceptions)
+                    {
+                        throw e;
+                    }
+                    else
+                    {
+                        return null;
+                    }
                 }
             }
         }
@@ -144,10 +187,29 @@ namespace AzSync
                     return file;
 
                 }
+                catch (StorageException se)
+                {
+                    L.Error(se, "Storage exception thrown getting Azure Storage file {fn} from share {sn}.", fileName, shareName);
+                    if (RethrowExceptions)
+                    {
+                        throw se;
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
                 catch (Exception e)
                 {
                     L.Error(e, "Exception thrown getting Azure Storage file {fn} from share {sn}.", fileName, shareName);
-                    return null;
+                    if (RethrowExceptions)
+                    {
+                        throw e;
+                    }
+                    else
+                    {
+                        return null;
+                    }
                 }
             }
         }
@@ -201,8 +263,8 @@ namespace AzSync
             if (BlobClient == null)
             {
                 BlobClient = GetStorageAccount().CreateCloudBlobClient();
+                BlobClient.DefaultRequestOptions.RetryPolicy = new LinearRetry(TimeSpan.FromSeconds(Engine.RetryTime), Engine.RetryCount);
             }
-
             return BlobClient;
         }
 
@@ -232,6 +294,7 @@ namespace AzSync
                 L.Error(e, "Exception throw parsing Azure connection string {cs}.", ConnectionString);
                 return null;
             }
+
         }
         #endregion
 

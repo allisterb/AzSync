@@ -2,13 +2,15 @@
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
 using Microsoft.Extensions.Configuration;
-using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.DataMovement;
+using Microsoft.WindowsAzure.Storage.RetryPolicies;
 
 using Serilog;
 using SerilogTimings;
@@ -34,54 +36,14 @@ namespace AzSync
             Contract.Requires(engineOptions.ContainsKey("Source") || engineOptions.ContainsKey("Destination"));
             EngineOptions = engineOptions;
             AppConfig = configuration;
-            Operation = (OperationType)EngineOptions["OperationType"];
-            UseStorageEmulator = (bool)EngineOptions["UseStorageEmulator"];
-            if (EngineOptions.ContainsKey("Source"))
+            
+            foreach (PropertyInfo prop in this.GetType().GetProperties())
             {
-                Source = (string)EngineOptions["Source"];
+                if (EngineOptions.ContainsKey(prop.Name) && prop.CanWrite)
+                {
+                    prop.SetValue(this, EngineOptions[prop.Name]);
+                }
             }
-            if (EngineOptions.ContainsKey("SourceDirectory"))
-            {
-                SourceDirectory = (DirectoryInfo)EngineOptions["SourceDirectory"];
-            }
-            if (EngineOptions.ContainsKey("SourceFiles"))
-            {
-                SourceFiles = (string[])EngineOptions["SourceFiles"];
-            }
-            if (EngineOptions.ContainsKey("SourceKey"))
-            {
-                SourceKey = (string)EngineOptions["SourceKey"];
-            }
-            if (EngineOptions.ContainsKey("SourceAccountName"))
-            {
-                SourceAccountName = (string)EngineOptions["SourceAccountName"];
-            }
-            if (EngineOptions.ContainsKey("SourceContainerName"))
-            {
-                SourceContainerName = (string)EngineOptions["SourceContainerName"];
-            }
-            if (EngineOptions.ContainsKey("Destination"))
-            {
-                Destination = (string)EngineOptions["Destination"];
-            }
-            if (EngineOptions.ContainsKey("DestinationKey"))
-            {
-                DestinationKey = (string)EngineOptions["DestinationKey"];
-            }
-            if (EngineOptions.ContainsKey("DestinationAccountName"))
-            {
-                DestinationAccountName = (string)EngineOptions["DestinationAccountName"];
-            }
-            if (EngineOptions.ContainsKey("DestinationContainerName"))
-            {
-                DestinationContainerName = (string)EngineOptions["DestinationContainerName"];
-            }
-            if (EngineOptions.ContainsKey("DestinationDirectory"))
-            {
-                DestinationDirectory = (DirectoryInfo)EngineOptions["DestinationDirectory"];
-            }
-            Pattern = (string) EngineOptions["Pattern"];
-            Recurse = (bool)EngineOptions["Recurse"];
             if (this.Operation == OperationType.COPY)
             {
                 Contract.Requires(!string.IsNullOrEmpty(Source) && !string.IsNullOrEmpty(Destination));
@@ -90,7 +52,6 @@ namespace AzSync
                 {
                     Contract.Requires(EngineOptions.ContainsKey("DestinationKey") && EngineOptions.ContainsKey("DestinationAccountName") && EngineOptions.ContainsKey("DestinationContainerName"));
                     Contract.Requires(EngineOptions.ContainsKey("SourceFiles"));
-                    DestinationUri = (Uri)EngineOptions["DestinationUri"];
                     string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(DestinationUri, DestinationKey);
                     if (string.IsNullOrEmpty(cs))
                     {
@@ -99,7 +60,7 @@ namespace AzSync
                     }
                     else
                     {
-                        DestinationStorage = new AzStorage(cs);
+                        DestinationStorage = new AzStorage(this, cs, true);
                         if (!DestinationStorage.Initialised)
                         {
                             L.Error("Could not intialise destination Azure storage.");
@@ -125,7 +86,7 @@ namespace AzSync
                     }
                     else
                     {
-                        SourceStorage = new AzStorage(cs);
+                        SourceStorage = new AzStorage(this, cs, true);
                         if (!SourceStorage.Initialised)
                         {
                             L.Error("Could not intialise source Azure storage.");
@@ -163,6 +124,11 @@ namespace AzSync
         public string DestinationContainerName { get; protected set; }
         public DirectoryInfo DestinationDirectory { get; protected set; }
         public AzStorage DestinationStorage { get; protected set; }
+        public string ContentType { get; protected set; }
+        public int BlockSizeKB { get; protected set; }
+        public int RetryCount { get; protected set; }
+        public int RetryTime { get; protected set; }
+        public bool Overwrite { get; protected set; }
         public string Pattern { get; protected set; }
         public bool Recurse { get; protected set; }
         public bool UseStorageEmulator { get; protected set; }
@@ -173,8 +139,15 @@ namespace AzSync
         {
             switch (this.Operation)
             {
-                case OperationType.COPY:    
-                    return await Upload();
+                case OperationType.COPY:
+                    if (DestinationUri != null)
+                    {
+                        return await Upload();
+                    }
+                    else
+                    {
+                        return await Download();
+                    }
                 default:
                     throw new NotImplementedException();
             }
@@ -182,6 +155,12 @@ namespace AzSync
 
         protected async Task<bool> Upload()
         {
+            if (SourceFiles.Length == 1)
+            {
+                bool u = await UploadSingleFile(SourceFiles[0]);
+                return u;
+            }
+            /*
             UploadDirectoryOptions options = new UploadDirectoryOptions
             {
                 SearchPattern = Pattern,
@@ -189,7 +168,7 @@ namespace AzSync
                 BlobType = BlobType.BlockBlob
             };
             DirectoryTransferContext ctx = new DirectoryTransferContext();
-            ctx.LogLevel = LogLevel.Verbose;
+            ctx.LogLevel = LogLevel.Verbose;*/
 
             /*
             CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(ContainerName, destinationBlobName, BlobType.BlockBlob);
@@ -203,6 +182,39 @@ namespace AzSync
             };
             */
 
+            return await Task.FromResult(true);
+        }
+
+        protected async Task<bool> UploadSingleFile(string fileName)
+        {
+            FileInfo file = new FileInfo(fileName);
+            UploadOptions options = new UploadOptions();
+            SingleTransferContext context = new SingleTransferContext();
+            context.SetAttributesCallback = (destination) =>
+            {
+                CloudBlob destBlob = destination as CloudBlob;
+                destBlob.Properties.ContentType = this.ContentType;
+            };
+            try
+            {
+                CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
+                await TransferManager.UploadAsync(file.FullName, destinationBlob);
+                return true;
+            }
+            catch (StorageException se)
+            {
+                L.Error(se, $"A storage error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
+                return false;
+            }
+            catch (TransferException te)
+            {
+                L.Error(te, $"A transfer error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
+                return false;
+            }
+        }
+
+        protected async Task<bool> Download()
+        {
             return await Task.FromResult(true);
         }
         #endregion

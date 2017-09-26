@@ -9,10 +9,10 @@ namespace AzSync.CLI
 {
     class Options
     {
-        [Option('s', "source", HelpText = "The Azure Storage resource or local directory that will be the sync source. For an Azure Storage resource you must use your Blob Service endpoint Url.")]
+        [Option('s', "source", HelpText = "The Azure Storage resource or local files or directory that will be the sync source. For an Azure Storage resource you must use your Blob Service endpoint Url.")]
         public string Source { get; set; }
 
-        [Option('d', "dest", HelpText = "The Azure Storage resource or local filesystem object that will be the sync destination. Use a single file or direcctory name if specifying a local sync destination. For an Azure Storage resource you must use your Blob Service endpoint Url.")]
+        [Option('d', "dest", HelpText = "The Azure Storage resource or local file or directory that will be the sync destination. Use a single file or direcctory name if specifying a local sync destination. For an Azure Storage resource you must use your Blob Service endpoint Url.")]
         public string Destination { get; set; }
 
         [Option('p', "pattern", HelpText = "The pattern to match names against in the sync source or destination. Use the standard OS wildcards for local file or directory names if specifying a local sync source.", Default = "*")]
@@ -21,9 +21,12 @@ namespace AzSync.CLI
         [Option('R', "recurse", HelpText = "Recurse into lower level sub-directories when searching for local file or directory names.", Default = false)]
         public bool Recurse { get; set; }
 
-        [Option('r', "retries", HelpText = "The number of times to retry an Azure Storage operation which does not complete successfully.", Default = 3)]
-        public int Retries { get; set; }
-        
+        [Option('r', "retry-count", HelpText = "The number of times to retry an Azure Storage operation which does not complete successfully.", Default = 3)]
+        public int RetryCount { get; set; }
+
+        [Option("retry-wait", HelpText = "The number of seconds to wait between retries.", Default = 10)]
+        public int RetryWait { get; set; }
+
         [Option("source-key", HelpText = "The account key for accessing the source Azure Storage resource.")]
         public string SourceKey { get; set; }
 
@@ -35,12 +38,16 @@ namespace AzSync.CLI
 
         [Option("block-size", HelpText = "The Azure Storage blob block size in kilobytes. Default is 4096.", Default = 4096)]
         public int BlockSizeKB { get; set; }
+
+        [Option("content-type", HelpText = "The content-type to set destination Azure Storage blobs to.")]
+        public string ContentType { get; set; }
     }
 
     [Verb("copy", HelpText = "Copy files and folders between the local filesystem and Azure Storage without synchronization.")]
     class CopyOptions : Options
     {
-
+        [Option("overwrite", HelpText = "Overwrite existing destination Azure Storage objects or local files or directories during a copy operation.")]
+        public bool Overwrite { get; protected set; }
     }
 
     [Verb("sync", HelpText = "Synchronize files and folders between the local filesystem and Azure Storage.")]

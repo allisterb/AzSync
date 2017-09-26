@@ -143,7 +143,7 @@ namespace AzSync.CLI
                 {
                     if (sourceUri.Segments.Length != 3)
                     {
-                        L.Error("The Azure endpoint Url for the sync source must be in the format http(s)://{host}/{account_name}/{container_name}");
+                        L.Error("The Azure endpoint Url for the sync source must be in the format http(s)://{account_name}.blob.core.windows.net/{container_name}");
                         Exit(ExitResult.INVALID_OPTIONS);
                     }
                     else
@@ -189,7 +189,7 @@ namespace AzSync.CLI
                 {
                     if (destinationUri.Segments.Length != 3)
                     {
-                        L.Error("The Azure endpoint Url for the sync destination must be in the format http(s)://{host}/{account_name}/{container_name}");
+                        L.Error("The Azure endpoint Url for the sync destination must be in the format http(s)://{account_name}.blob.core.windows.net/{container_name}");
                         Exit(ExitResult.INVALID_OPTIONS);
                     }
                     else
