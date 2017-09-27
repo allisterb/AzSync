@@ -4,13 +4,13 @@ using System.Diagnostics.Contracts;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.DataMovement;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
 
 using Serilog;
 using SerilogTimings;
@@ -30,12 +30,13 @@ namespace AzSync
         #endregion
 
         #region Constructors
-        public SyncEngine(Dictionary<string, object> engineOptions, IConfigurationRoot configuration, TextWriter output)
+        public SyncEngine(Dictionary<string, object> engineOptions, CancellationToken ct, IConfigurationRoot configuration, TextWriter output)
         {
             Contract.Requires(engineOptions.ContainsKey("OperationType"));
             Contract.Requires(engineOptions.ContainsKey("Source") || engineOptions.ContainsKey("Destination"));
             EngineOptions = engineOptions;
             AppConfig = configuration;
+            CT = ct;
             
             foreach (PropertyInfo prop in this.GetType().GetProperties())
             {
@@ -44,6 +45,9 @@ namespace AzSync
                     prop.SetValue(this, EngineOptions[prop.Name]);
                 }
             }
+
+            TransferManager.Configurations.BlockSize = this.BlockSizeKB * 1024;
+
             if (this.Operation == OperationType.COPY)
             {
                 Contract.Requires(!string.IsNullOrEmpty(Source) && !string.IsNullOrEmpty(Destination));
@@ -104,7 +108,6 @@ namespace AzSync
         #endregion
 
         #region Properties
-        protected Logger<SyncEngine> L = new Logger<SyncEngine>();
         public bool Initialised { get; protected set; } = false;
         public IConfigurationRoot AppConfig { get; protected set; }
         public Dictionary<string, object> EngineOptions { get; protected set; }
@@ -132,6 +135,8 @@ namespace AzSync
         public string Pattern { get; protected set; }
         public bool Recurse { get; protected set; }
         public bool UseStorageEmulator { get; protected set; }
+        public string JournalFilePath { get; protected set; }
+        public FileInfo JournalFile { get; protected set; }
         #endregion
 
         #region Methods
@@ -169,19 +174,6 @@ namespace AzSync
             };
             DirectoryTransferContext ctx = new DirectoryTransferContext();
             ctx.LogLevel = LogLevel.Verbose;*/
-
-            /*
-            CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(ContainerName, destinationBlobName, BlobType.BlockBlob);
-            UploadOptions options = new UploadOptions();
-
-            SingleTransferContext context = new SingleTransferContext();
-            context.SetAttributesCallback = (destination) =>
-            {
-                Cloud=Blob destBlob = destination as CloudBlob;
-                destBlob.Properties.ContentType = "image/png";
-            };
-            */
-
             return await Task.FromResult(true);
         }
 
@@ -189,17 +181,68 @@ namespace AzSync
         {
             FileInfo file = new FileInfo(fileName);
             UploadOptions options = new UploadOptions();
-            SingleTransferContext context = new SingleTransferContext();
+            if (string.IsNullOrEmpty(JournalFilePath))
+            {
+                JournalFilePath = fileName + ".azsj";
+            }
+            FileStream journalStream = null;
+            try
+            {
+                JournalFile = new FileInfo(JournalFilePath);
+                if (JournalFile.Exists)
+                {
+                    L.Info("Resuming upload from journal file {file}.", JournalFile.FullName);
+                }
+                else
+                {
+                    L.Info("Writing new journal file {file}.", JournalFile.FullName);
+                }
+                journalStream = JournalFile.Open(FileMode.OpenOrCreate, FileAccess.ReadWrite);
+            }
+            catch (IOException ioe)
+            {
+                L.Error(ioe, "An error occurred attempting to open the journal file {file}.", JournalFile.FullName);
+                if (journalStream != null)
+                {
+                    journalStream.Dispose();
+                    return false;
+                }
+            }
+            SingleTransferContext context;
+            if (journalStream.Length > 0)
+            {
+                SingleTransferContext resumeContext = new SingleTransferContext(journalStream);
+                context = new SingleTransferContext(resumeContext.LastCheckpoint);
+            }
+            else
+            {
+                context = new SingleTransferContext(journalStream);
+            }
+            context.LogLevel = LogLevel.Informational;
+        
+            context.ProgressHandler = new TransferProgressReporter();
             context.SetAttributesCallback = (destination) =>
             {
                 CloudBlob destBlob = destination as CloudBlob;
                 destBlob.Properties.ContentType = this.ContentType;
             };
+            context.ShouldOverwriteCallback = (source, destination) =>
+            {
+                bool o = this.Overwrite;
+                return o;
+            };
+            context.FileTransferred += Context_FileTransferred;
+            context.FileFailed += Context_FileFailed;
             try
             {
                 CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
-                await TransferManager.UploadAsync(file.FullName, destinationBlob);
+                await TransferManager.UploadAsync(file.FullName, destinationBlob, options, context, CT);
                 return true;
+            }
+            catch (TaskCanceledException)
+            {
+                L.Info("The upload task was cancelled.");
+                return false;
             }
             catch (StorageException se)
             {
@@ -211,12 +254,35 @@ namespace AzSync
                 L.Error(te, $"A transfer error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
                 return false;
             }
+            finally
+            {
+                if (journalStream != null)
+                {
+                    journalStream.Flush();
+                    journalStream.Dispose();
+                }
+            }
+        }
+
+        private void Context_FileFailed(object sender, TransferEventArgs e)
+        {
+            
+        }
+
+        private void Context_FileTransferred(object sender, TransferEventArgs e)
+        {
+            //L.Success(e.)
         }
 
         protected async Task<bool> Download()
         {
             return await Task.FromResult(true);
         }
+        #endregion
+
+        #region Fields
+        protected Logger<SyncEngine> L = new Logger<SyncEngine>();
+        protected CancellationToken CT;
         #endregion
     }
 }

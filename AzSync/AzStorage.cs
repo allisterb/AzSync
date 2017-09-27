@@ -5,6 +5,7 @@
 namespace AzSync
 {
     using System;
+    using System.Diagnostics.Contracts;
     using System.Text;
     using System.Threading.Tasks;
 
@@ -57,20 +58,28 @@ namespace AzSync
             return csb.ToString();
         }
 
-        /// <summary>
-        /// Get a CloudBlob instance with the specified name and type in the given container or create a reference to a new blob.
-        /// </summary>
-        /// <param name="containerName">Container name.</param>
-        /// <param name="blobName">Blob name.</param>
-        /// <param name="blobType">Type of blob.</param>
-        /// <returns>A <see cref="Task{T}"/> object of type <see cref="CloudBlob"/> that represents the asynchronous operation.</returns>
+        private static string GetAzureResourceName(string name)
+        {
+            StringBuilder rn = new StringBuilder(63, 63);
+            int i = 0;
+            foreach (char c in name)
+            {
+                if (char.IsLetterOrDigit(c))
+                    rn.Append(c);
+                else
+                    rn.Append('-');
+                if (++i == 63) break;
+            }
+            return rn.ToString();
+        }
+        
         public async Task<CloudBlob> GetorCreateCloudBlobAsync(string containerName, string blobName, BlobType blobType, DateTimeOffset? snapshotTime = null)
         { using (Operation azOp = L.Begin("Get Azure Storage blob {0}/{1}", containerName, blobName))
             {
                 try
                 {
-                    CloudBlobClient client = GetCloudBlobClient();
-                    CloudBlobContainer container = client.GetContainerReference(containerName);
+                    GetCloudBlobClient();
+                    CloudBlobContainer container = BlobClient.GetContainerReference(containerName);
                     await container.CreateIfNotExistsAsync();
 
                     CloudBlob cloudBlob;
@@ -94,7 +103,7 @@ namespace AzSync
                 }
                 catch (StorageException se)
                 {
-                    L.Error(se, "Storage exception thrown getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
+                    L.Error(se, "Storage error occurred getting Azure Storage blob {bn} in container {cn}.", blobName, containerName);
                     if (RethrowExceptions)
                     {
                         throw se;
@@ -106,7 +115,7 @@ namespace AzSync
                 }
                 catch (Exception e)
                 {
-                    L.Error(e, "Exception thrown getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
+                    L.Error(e, "Error occurred getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
                     if (RethrowExceptions)
                     {
                         throw e;
@@ -128,12 +137,12 @@ namespace AzSync
         /// <returns>A <see cref="Task{T}"/> object of type <see cref="CloudBlobDirectory"/> that represents the asynchronous operation.</returns>
         public async Task<CloudBlobDirectory> GetCloudBlobDirectoryAsync(string containerName, string directoryName)
         {
-            using (Operation azOp = L.Begin("Get Azure Storage directory"))
+            using (Operation azOp = L.Begin("Get Azure Storage blob directory"))
             {
                 try
                 {
-                    CloudBlobClient client = GetCloudBlobClient();
-                    CloudBlobContainer container = client.GetContainerReference(containerName);
+                    GetCloudBlobClient();
+                    CloudBlobContainer container = BlobClient.GetContainerReference(containerName);
                     await container.CreateIfNotExistsAsync();
                     CloudBlobDirectory dir = container.GetDirectoryReference(directoryName);
                     azOp.Complete();
@@ -141,7 +150,7 @@ namespace AzSync
                 }
                 catch (StorageException se)
                 {
-                    L.Error(se, "Storage exception thrown getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
+                    L.Error(se, "Storage error occurred getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
                     if (RethrowExceptions)
                     {
                         throw se;

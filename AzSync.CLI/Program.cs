@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Microsoft.Extensions.Configuration;
@@ -32,6 +33,7 @@ namespace AzSync.CLI
         static Logger<Program> L;
         static SyncEngine Engine;
         static Dictionary<string, object> EngineOptions = new Dictionary<string, object>(3);
+        static CancellationTokenSource CTS = new CancellationTokenSource();
 
         static void Main(string[] args)
         {
@@ -169,7 +171,7 @@ namespace AzSync.CLI
                     }
                     catch (IOException ioe)
                     {
-                        L.Error(ioe, "A storage exception was thrown attempting to find local directory {d}.", o.Source);
+                        L.Error(ioe, "A storage error occurred  attempting to find local directory {d}.", o.Source);
                         Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
                     }
                     string[] files = Directory.GetFiles(o.Source, o.Pattern, o.Recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
@@ -296,7 +298,7 @@ namespace AzSync.CLI
             {
                 using (Operation engineOp = L.Begin("Initialising sync engine"))
                 {
-                    Engine = new SyncEngine(EngineOptions, AppConfig, Console.Out);
+                    Engine = new SyncEngine(EngineOptions, CTS.Token, AppConfig, Console.Out);
                     if (!Engine.Initialised)
                     {
                         Exit(ExitResult.ANALYSIS_ENGINE_INIT_ERROR);
@@ -348,6 +350,10 @@ namespace AzSync.CLI
         }
         static void Program_UnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
+            if (CTS != null)
+            {
+                CTS.Dispose();
+            }
             try
             {
                 L.Error(e.ExceptionObject as Exception, "An unhandled runtime exception occurred. AzSync CLI will terminate.");
