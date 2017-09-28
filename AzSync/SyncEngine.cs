@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.IO;
 using System.Reflection;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -107,6 +109,183 @@ namespace AzSync
         }
         #endregion
 
+        #region Methods
+        public async Task<bool> Sync()
+        {
+            switch (this.Operation)
+            {
+                case OperationType.COPY:
+                    if (DestinationUri != null)
+                    {
+                        return await Upload();
+                    }
+                    else
+                    {
+                        return await Download();
+                    }
+                default:
+                    throw new NotImplementedException();
+            }
+        }
+
+        protected async Task<bool> Upload()
+        {
+            if (SourceFiles.Length == 1)
+            {
+                bool u = await UploadSingleFile(SourceFiles[0]);
+                return u;
+            }
+            return await Task.FromResult(true);
+        }
+
+        protected async Task<bool> UploadSingleFile(string fileName)
+        {
+            FileInfo file = new FileInfo(fileName);
+            if (string.IsNullOrEmpty(JournalFilePath))
+            {
+                JournalFilePath = file.FullName + ".azsj";
+            }
+            GetJournalStream();
+            UploadOptions options = new UploadOptions();
+            SingleTransferContext context = new SingleTransferContext(JournalStream);
+            context.LogLevel = LogLevel.Informational;
+            context.ProgressHandler = new TransferProgressReporter();
+            context.SetAttributesCallback = (destination) =>
+            {
+                CloudBlob destBlob = destination as CloudBlob;
+                destBlob.Properties.ContentType = this.ContentType;
+            };
+            context.ShouldOverwriteCallback = (source, destination) =>
+            {
+                bool o = this.Overwrite;
+                return o;
+            };
+            context.FileTransferred += Context_FileTransferred;
+            context.FileFailed += Context_FileFailed;
+            context.FileSkipped += Context_FileSkipped;
+            try
+            {
+                CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
+                TransferTask = TransferManager.UploadAsync(file.FullName, destinationBlob, options, context, CT);
+                await TransferTask;
+                return true;
+            }
+            catch (TaskCanceledException)
+            {
+                L.Info("The upload operation was cancelled.");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                L.Info("The upload operation was cancelled.");
+                return true;
+            }
+            catch (StorageException se)
+            {
+                L.Error(se, $"A storage error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
+                return false;
+            }
+            catch (TransferException te)
+            {
+                if (CT.IsCancellationRequested)
+                {
+                    L.Info("The upload operation was cancelled by the user.");
+                    return true;
+                }
+                else
+                {
+                    L.Error(te, $"A transfer error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
+                    return false;
+                }
+            }
+            finally
+            {
+                CloseJournalStream();
+            }
+        }
+
+        private void Context_FileSkipped(object sender, TransferEventArgs e)
+        {
+            
+        }
+
+        protected async Task<bool> UploadMultipleFiles()
+        {
+            /*
+           UploadDirectoryOptions options = new UploadDirectoryOptions
+           {
+               SearchPattern = Pattern,
+               Recursive = Recurse,
+               BlobType = BlobType.BlockBlob
+           };
+           DirectoryTransferContext ctx = new DirectoryTransferContext();
+           ctx.LogLevel = LogLevel.Verbose;*/
+            return true;
+        }
+        protected async Task<bool> Download ()
+        {
+            return await Task.FromResult(true);
+        }
+
+        protected bool GetJournalStream()
+        {
+            try
+            {
+                JournalFile = new FileInfo(JournalFilePath);
+                if (JournalFile.Exists)
+                {
+                    L.Info("Resuming transfer from journal file {file}.", JournalFile.FullName);
+                    JournalStream = JournalFile.Open(FileMode.Open, FileAccess.ReadWrite);
+                }
+                else
+                {
+                    L.Info("Creating journal file {file} for transfer.", JournalFile.FullName);
+                    JournalStream = JournalFile.Open(FileMode.CreateNew, FileAccess.ReadWrite);
+                }
+                return true;
+            }
+            catch (IOException ioe)
+            {
+                L.Error(ioe, "An I/O error occurred attempting to use the journal file {file}. No journal file for this transfer will be used,", JournalFile.FullName);
+                JournalStream = new MemoryStream();
+                return false;
+            }
+            catch (Exception e)
+            {
+                L.Error(e, "An I/O error occurred attempting to use the journal file {file}. No journal file for this transfer will be used,", JournalFile.FullName);
+                JournalStream = new MemoryStream();
+                return false;
+            }
+        }
+
+        protected void CloseJournalStream()
+        {
+            if (JournalStream != null)
+            {
+                JournalStream.Flush();
+                JournalStream.Dispose();
+            }
+        }
+
+        private void Context_FileFailed(object sender, TransferEventArgs e)
+        {
+            if (CT.IsCancellationRequested)
+            {
+                L.Warn("Transfer of file {file} was cancelled before completion by the user.", e.Source);
+            }
+            else
+            {
+                L.Warn("Transfer of file {file} failed.", e.Source);
+            }
+            
+        }
+
+        private void Context_FileTransferred(object sender, TransferEventArgs e)
+        {
+            //L.Success(e.)
+        }
+        #endregion
+
         #region Properties
         public bool Initialised { get; protected set; } = false;
         public IConfigurationRoot AppConfig { get; protected set; }
@@ -137,147 +316,8 @@ namespace AzSync
         public bool UseStorageEmulator { get; protected set; }
         public string JournalFilePath { get; protected set; }
         public FileInfo JournalFile { get; protected set; }
-        #endregion
-
-        #region Methods
-        public async Task<bool> Sync()
-        {
-            switch (this.Operation)
-            {
-                case OperationType.COPY:
-                    if (DestinationUri != null)
-                    {
-                        return await Upload();
-                    }
-                    else
-                    {
-                        return await Download();
-                    }
-                default:
-                    throw new NotImplementedException();
-            }
-        }
-
-        protected async Task<bool> Upload()
-        {
-            if (SourceFiles.Length == 1)
-            {
-                bool u = await UploadSingleFile(SourceFiles[0]);
-                return u;
-            }
-            /*
-            UploadDirectoryOptions options = new UploadDirectoryOptions
-            {
-                SearchPattern = Pattern,
-                Recursive = Recurse,
-                BlobType = BlobType.BlockBlob
-            };
-            DirectoryTransferContext ctx = new DirectoryTransferContext();
-            ctx.LogLevel = LogLevel.Verbose;*/
-            return await Task.FromResult(true);
-        }
-
-        protected async Task<bool> UploadSingleFile(string fileName)
-        {
-            FileInfo file = new FileInfo(fileName);
-            UploadOptions options = new UploadOptions();
-            if (string.IsNullOrEmpty(JournalFilePath))
-            {
-                JournalFilePath = fileName + ".azsj";
-            }
-            FileStream journalStream = null;
-            try
-            {
-                JournalFile = new FileInfo(JournalFilePath);
-                if (JournalFile.Exists)
-                {
-                    L.Info("Resuming upload from journal file {file}.", JournalFile.FullName);
-                }
-                else
-                {
-                    L.Info("Writing new journal file {file}.", JournalFile.FullName);
-                }
-                journalStream = JournalFile.Open(FileMode.OpenOrCreate, FileAccess.ReadWrite);
-            }
-            catch (IOException ioe)
-            {
-                L.Error(ioe, "An error occurred attempting to open the journal file {file}.", JournalFile.FullName);
-                if (journalStream != null)
-                {
-                    journalStream.Dispose();
-                    return false;
-                }
-            }
-            SingleTransferContext context;
-            if (journalStream.Length > 0)
-            {
-                SingleTransferContext resumeContext = new SingleTransferContext(journalStream);
-                context = new SingleTransferContext(resumeContext.LastCheckpoint);
-            }
-            else
-            {
-                context = new SingleTransferContext(journalStream);
-            }
-            context.LogLevel = LogLevel.Informational;
-        
-            context.ProgressHandler = new TransferProgressReporter();
-            context.SetAttributesCallback = (destination) =>
-            {
-                CloudBlob destBlob = destination as CloudBlob;
-                destBlob.Properties.ContentType = this.ContentType;
-            };
-            context.ShouldOverwriteCallback = (source, destination) =>
-            {
-                bool o = this.Overwrite;
-                return o;
-            };
-            context.FileTransferred += Context_FileTransferred;
-            context.FileFailed += Context_FileFailed;
-            try
-            {
-                CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
-                await TransferManager.UploadAsync(file.FullName, destinationBlob, options, context, CT);
-                return true;
-            }
-            catch (TaskCanceledException)
-            {
-                L.Info("The upload task was cancelled.");
-                return false;
-            }
-            catch (StorageException se)
-            {
-                L.Error(se, $"A storage error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
-                return false;
-            }
-            catch (TransferException te)
-            {
-                L.Error(te, $"A transfer error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
-                return false;
-            }
-            finally
-            {
-                if (journalStream != null)
-                {
-                    journalStream.Flush();
-                    journalStream.Dispose();
-                }
-            }
-        }
-
-        private void Context_FileFailed(object sender, TransferEventArgs e)
-        {
-            
-        }
-
-        private void Context_FileTransferred(object sender, TransferEventArgs e)
-        {
-            //L.Success(e.)
-        }
-
-        protected async Task<bool> Download()
-        {
-            return await Task.FromResult(true);
-        }
+        public Stream JournalStream { get; protected set; }
+        public Task TransferTask { get; protected set; }
         #endregion
 
         #region Fields

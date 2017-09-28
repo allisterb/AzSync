@@ -34,10 +34,14 @@ namespace AzSync.CLI
         static SyncEngine Engine;
         static Dictionary<string, object> EngineOptions = new Dictionary<string, object>(3);
         static CancellationTokenSource CTS = new CancellationTokenSource();
+        static Task<ExitResult> SyncTask;
+        static Task ReadConsoleKeysTask;
 
         static void Main(string[] args)
         {
             AppDomain.CurrentDomain.UnhandledException += Program_UnhandledException;
+
+            Console.CancelKeyPress += Console_CancelKeyPress;
 
             if (args.Contains("-v") || args.Contains("--verbose"))
             {
@@ -130,7 +134,7 @@ namespace AzSync.CLI
                 o.Destination = string.IsNullOrEmpty(AppConfig["Destination"]) ? o.Destination : AppConfig["Destination"];
                 o.DestinationKey = string.IsNullOrEmpty(AppConfig["DestKey"]) ? o.DestinationKey : AppConfig["DestKey"];
                 o.Pattern = string.IsNullOrEmpty(AppConfig["Pattern"]) ? o.Pattern : AppConfig["Pattern"];
-          
+
                 if (o.UseStorageEmulator)
                 {
                     o.DestinationKey = @"Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
@@ -263,8 +267,7 @@ namespace AzSync.CLI
                         Exit(ExitResult.INVALID_OPTIONS);
                     }
                 }
-
-                Sync().Wait();
+                ExecuteSyncTasks();
             })
             .WithParsed((SyncOptions o) =>
             {
@@ -288,11 +291,11 @@ namespace AzSync.CLI
                     L.Error("You must specify the account key for accessing the destination Azure Storage object.");
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
-                Sync().Wait();
+                ExecuteSyncTasks();
             });
         }
 
-        static async Task Sync()
+        static async Task<ExitResult> Sync()
         {
             using (Operation programOp = L.Begin("Azure Storage sync operation"))
             {
@@ -301,7 +304,7 @@ namespace AzSync.CLI
                     Engine = new SyncEngine(EngineOptions, CTS.Token, AppConfig, Console.Out);
                     if (!Engine.Initialised)
                     {
-                        Exit(ExitResult.ANALYSIS_ENGINE_INIT_ERROR);
+                        return ExitResult.ANALYSIS_ENGINE_INIT_ERROR;
                     }
                     else
                     {
@@ -314,13 +317,69 @@ namespace AzSync.CLI
                     {
                         engineOp.Complete();
                         programOp.Complete();
+                        return ExitResult.SUCCESS;
+                    }
+                    else
+                    {
+                        return ExitResult.SYNC_ERROR;
+                    }
+                }
+            }
+        }
+
+        static void ExecuteSyncTasks()
+        {
+            Task[] tasks = { SyncTask = Sync(), ReadConsoleKeysTask = Task.Run(() => ReadConsoleKeys()) };
+            try
+            {
+
+                int c = Task.WaitAny(tasks, CTS.Token);
+                if (c == 0)
+                {
+                    Exit(SyncTask.Result);
+                }
+                else
+                {
+                    SyncTask.Wait();
+                    Exit(ExitResult.SUCCESS);
+                }
+            }
+            catch (AggregateException ae)
+            {
+                foreach (Exception e in ae.InnerExceptions)
+                {
+                    if (e is TaskCanceledException)
+                    {
+                        L.Info("Sync operation cancelled by user.");
                         Exit(ExitResult.SUCCESS);
                     }
                     else
                     {
-                        Exit(ExitResult.SYNC_ERROR);
+                        L.Error(e, "An unknown error occurred during program execution");
+                        Exit(ExitResult.UNHANDLED_EXCEPTION);
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                SyncTask.Wait();
+                Exit(ExitResult.SUCCESS);
+            }
+            finally
+            {
+                CTS.Dispose();
+            }
+
+
+        }
+        static void ReadConsoleKeys()
+        {
+            ConsoleKeyInfo cki = Console.ReadKey(true);
+            if (((cki.Modifiers & ConsoleModifiers.Control) != 0) && (cki.Key == ConsoleKey.Q))
+            {
+                L.Info("Ctrl-Q stop requested by user.");
+                CTS.Cancel();
+                return;
             }
         }
 
@@ -348,6 +407,7 @@ namespace AzSync.CLI
                 return e;
             });
         }
+
         static void Program_UnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             if (CTS != null)
@@ -368,5 +428,13 @@ namespace AzSync.CLI
                 Environment.Exit((int)ExitResult.UNHANDLED_EXCEPTION);
             }
         }
+
+        static void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)
+        {
+            L.Info("Stop transfer requested by user.");
+            CTS.Cancel();
+            Exit(ExitResult.SUCCESS);
+        }
+
     }
 }
