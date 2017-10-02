@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 using Microsoft.Extensions.Configuration;
 using Serilog;
+using Serilog.Enrichers;
 using SerilogTimings;
 using CommandLine;
 using CommandLine.Text;
@@ -23,19 +24,19 @@ namespace AzSync.CLI
             UNHANDLED_EXCEPTION = 1,
             INVALID_OPTIONS = 2,
             FILE_OR_DIRECTORY_NOT_FOUND = 3,
-            ANALYSIS_ENGINE_INIT_ERROR = 4,
-            SYNC_ERROR = 5
+            TRANSFER_ENGINE_INIT_ERROR = 4,
+            TRANSFER_ERROR = 5
         }
 
         static Version Version = Assembly.GetExecutingAssembly().GetName().Version;
         static IConfigurationRoot AppConfig;
         static LoggerConfiguration LConfig;
         static Logger<Program> L;
-        static SyncEngine Engine;
+        static TransferEngine Engine;
         static Dictionary<string, object> EngineOptions = new Dictionary<string, object>(3);
         static CancellationTokenSource CTS = new CancellationTokenSource();
-        static Task<ExitResult> SyncTask;
-        static Task ReadConsoleKeysTask;
+        static Task<ExitResult> TransferTask;
+        static Task ReadConsoleKeyTask;
 
         static void Main(string[] args)
         {
@@ -48,14 +49,16 @@ namespace AzSync.CLI
                 LConfig = new LoggerConfiguration()
                 .MinimumLevel.Verbose()
                 .Enrich.FromLogContext()
-                .WriteTo.Console();
+                .Enrich.WithThreadId()
+                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {SourceContext}: {Message}{NewLine}");
             }
             else
             {
                 LConfig = new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .Enrich.FromLogContext()
-                .WriteTo.Console();
+                .Enrich.WithThreadId()
+                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {Message}{NewLine}");
             }
 
             IConfigurationBuilder builder = new ConfigurationBuilder()
@@ -147,16 +150,20 @@ namespace AzSync.CLI
 
                 if (!string.IsNullOrEmpty(o.Source) && (o.Source.StartsWith("http://") || o.Source.StartsWith("https://")) && Uri.TryCreate(o.Source, UriKind.Absolute, out Uri sourceUri))
                 {
-                    if (sourceUri.Segments.Length != 3)
+                    if (sourceUri.Segments.Length < 3)
                     {
                         L.Error("The Azure endpoint Url for the sync source must be in the format http(s)://{account_name}.blob.core.windows.net/{container_name}");
                         Exit(ExitResult.INVALID_OPTIONS);
                     }
                     else
                     {
+                        EngineOptions.Add("SourceUri", sourceUri);
                         EngineOptions.Add("SourceAccountName", sourceUri.Segments[1].TrimEnd('/'));
                         EngineOptions.Add("SourceContainerName", sourceUri.Segments[2]);
-                        EngineOptions.Add("SourceUri", sourceUri);
+                        if (sourceUri.Segments.Length == 4)
+                        {
+                            EngineOptions.Add("SourceBlobName", sourceUri.Segments[3]);
+                        }
                     }
                 }
                 else if (!string.IsNullOrEmpty(o.Source))
@@ -200,9 +207,13 @@ namespace AzSync.CLI
                     }
                     else
                     {
+                        EngineOptions.Add("DestinationUri", destinationUri);
                         EngineOptions.Add("DestinationAccountName", destinationUri.Segments[1].TrimEnd('/'));
                         EngineOptions.Add("DestinationContainerName", destinationUri.Segments[2]);
-                        EngineOptions.Add("DestinationUri", destinationUri);
+                        if (destinationUri.Segments.Length == 4)
+                        {
+                            EngineOptions.Add("DestinationBlobName", destinationUri.Segments[3]);
+                        }
                     }
                 }
                 else if (!string.IsNullOrEmpty(o.Destination))
@@ -228,7 +239,7 @@ namespace AzSync.CLI
             })
             .WithParsed((CopyOptions o) =>
             {
-                EngineOptions.Add("OperationType", SyncEngine.OperationType.COPY);
+                EngineOptions.Add("OperationType", TransferEngine.OperationType.COPY);
                 if (string.IsNullOrEmpty(o.Source) || string.IsNullOrEmpty(o.Destination))
                 {
                     L.Error("You must specify both the source and destination parameters for an upload operation.");
@@ -267,7 +278,7 @@ namespace AzSync.CLI
                         Exit(ExitResult.INVALID_OPTIONS);
                     }
                 }
-                ExecuteSyncTasks();
+                ExecuteTransferTasks();
             })
             .WithParsed((SyncOptions o) =>
             {
@@ -291,20 +302,20 @@ namespace AzSync.CLI
                     L.Error("You must specify the account key for accessing the destination Azure Storage object.");
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
-                ExecuteSyncTasks();
+                ExecuteTransferTasks();
             });
         }
 
-        static async Task<ExitResult> Sync()
+        static async Task<ExitResult> Transfer()
         {
-            using (Operation programOp = L.Begin("Azure Storage sync operation"))
+            using (Operation programOp = L.Begin("Azure Storage transfer operation"))
             {
-                using (Operation engineOp = L.Begin("Initialising sync engine"))
+                using (Operation engineOp = L.Begin("Initialising transfer engine"))
                 {
-                    Engine = new SyncEngine(EngineOptions, CTS.Token, AppConfig, Console.Out);
+                    Engine = new TransferEngine(EngineOptions, CTS.Token, AppConfig, Console.Out);
                     if (!Engine.Initialised)
                     {
-                        return ExitResult.ANALYSIS_ENGINE_INIT_ERROR;
+                        return ExitResult.TRANSFER_ENGINE_INIT_ERROR;
                     }
                     else
                     {
@@ -313,7 +324,7 @@ namespace AzSync.CLI
                 }
                 using (Operation engineOp = L.Begin("Azure Storage {op}", EngineOptions["OperationType"]))
                 {
-                    if (await Engine.Sync())
+                    if (await Engine.Transfer())
                     {
                         engineOp.Complete();
                         programOp.Complete();
@@ -321,26 +332,26 @@ namespace AzSync.CLI
                     }
                     else
                     {
-                        return ExitResult.SYNC_ERROR;
+                        return ExitResult.TRANSFER_ERROR;
                     }
                 }
             }
         }
 
-        static void ExecuteSyncTasks()
+        static void ExecuteTransferTasks()
         {
-            Task[] tasks = { SyncTask = Sync(), ReadConsoleKeysTask = Task.Run(() => ReadConsoleKeys()) };
+            Task[] tasks = { TransferTask = Transfer(), ReadConsoleKeyTask = Task.Run(() => ReadConsoleKeys()) };
             try
             {
 
                 int c = Task.WaitAny(tasks, CTS.Token);
                 if (c == 0)
                 {
-                    Exit(SyncTask.Result);
+                    Exit(TransferTask.Result);
                 }
                 else
                 {
-                    SyncTask.Wait();
+                    TransferTask.Wait();
                     Exit(ExitResult.SUCCESS);
                 }
             }
@@ -362,7 +373,7 @@ namespace AzSync.CLI
             }
             catch (OperationCanceledException)
             {
-                SyncTask.Wait();
+                TransferTask.Wait();
                 Exit(ExitResult.SUCCESS);
             }
             finally
@@ -386,6 +397,11 @@ namespace AzSync.CLI
         static void Exit(ExitResult result)
         {
             Log.CloseAndFlush();
+            if (CTS != null)
+            {
+                CTS.Dispose();
+            }
+
             Environment.Exit((int)result);
         }
 
@@ -406,6 +422,17 @@ namespace AzSync.CLI
             {
                 return e;
             });
+        }
+
+        static void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)
+        {
+            L.Info("Stop transfer requested by user.");
+            CTS.Cancel();
+            if (TransferTask != null && !TransferTask.IsCompleted)
+            {
+                TransferTask.Wait();
+            }
+            Exit(ExitResult.SUCCESS);
         }
 
         static void Program_UnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -429,12 +456,7 @@ namespace AzSync.CLI
             }
         }
 
-        static void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)
-        {
-            L.Info("Stop transfer requested by user.");
-            CTS.Cancel();
-            Exit(ExitResult.SUCCESS);
-        }
+        
 
     }
 }

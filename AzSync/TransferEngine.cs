@@ -14,13 +14,15 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.DataMovement;
 
+using Octodiff.Core;
+
 using Serilog;
 using SerilogTimings;
 
 
 namespace AzSync
 {
-    public class SyncEngine : ILogging
+    public class TransferEngine : ILogging
     {
         #region Enums
         public enum OperationType
@@ -29,10 +31,16 @@ namespace AzSync
             SYNC,
             INFO
         }
+
+        public enum TransferDirection
+        {
+            UP,
+            DOWN
+        }
         #endregion
 
         #region Constructors
-        public SyncEngine(Dictionary<string, object> engineOptions, CancellationToken ct, IConfigurationRoot configuration, TextWriter output)
+        public TransferEngine(Dictionary<string, object> engineOptions, CancellationToken ct, IConfigurationRoot configuration, TextWriter output)
         {
             Contract.Requires(engineOptions.ContainsKey("OperationType"));
             Contract.Requires(engineOptions.ContainsKey("Source") || engineOptions.ContainsKey("Destination"));
@@ -69,13 +77,13 @@ namespace AzSync
                         DestinationStorage = new AzStorage(this, cs, true);
                         if (!DestinationStorage.Initialised)
                         {
-                            L.Error("Could not intialise destination Azure storage.");
-                            Initialised = false;
+                            L.Error("Could not initialise destination Azure storage.");
                             return;
                         }
                         else
                         {
                             this.Initialised = true;
+                            Direction = TransferDirection.UP;
                         }
                     }
                 }
@@ -83,7 +91,6 @@ namespace AzSync
                 {
                     Contract.Requires(EngineOptions.ContainsKey("SourceKey") && EngineOptions.ContainsKey("SourceAccountName") && EngineOptions.ContainsKey("SourceContainerName"));
                     Contract.Requires(EngineOptions.ContainsKey("DestinationDirectory"));
-                    SourceUri = (Uri)EngineOptions["SourceUri"];
                     string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(SourceUri, SourceKey);
                     if (string.IsNullOrEmpty(cs))
                     {
@@ -102,6 +109,7 @@ namespace AzSync
                         else
                         {
                             Initialised = true;
+                            Direction = TransferDirection.DOWN;
                         }
                     }
                 }
@@ -110,18 +118,27 @@ namespace AzSync
         #endregion
 
         #region Methods
-        public async Task<bool> Sync()
+        public async Task<bool> Transfer()
         {
             switch (this.Operation)
             {
                 case OperationType.COPY:
-                    if (DestinationUri != null)
+                    if (Direction == TransferDirection.UP)
                     {
                         return await Upload();
                     }
                     else
                     {
                         return await Download();
+                    }
+                case OperationType.SYNC:
+                    if (Direction == TransferDirection.UP)
+                    {
+                        return await SyncLocalToRemote();
+                    }
+                    else
+                    {
+                        return await SyncRemoteToLocal();
                     }
                 default:
                     throw new NotImplementedException();
@@ -145,15 +162,15 @@ namespace AzSync
             {
                 JournalFilePath = file.FullName + ".azsj";
             }
-            GetJournalStream();
+            OpenTransferJournal();
             UploadOptions options = new UploadOptions();
             SingleTransferContext context = new SingleTransferContext(JournalStream);
             context.LogLevel = LogLevel.Informational;
-            context.ProgressHandler = new TransferProgressReporter();
+            context.ProgressHandler = new SingleFileUploadProgressReporter(file);
             context.SetAttributesCallback = (destination) =>
             {
-                CloudBlob destBlob = destination as CloudBlob;
-                destBlob.Properties.ContentType = this.ContentType;
+                DestinationBlob = destination as CloudBlob;
+                DestinationBlob.Properties.ContentType = this.ContentType;
             };
             context.ShouldOverwriteCallback = (source, destination) =>
             {
@@ -165,10 +182,13 @@ namespace AzSync
             context.FileSkipped += Context_FileSkipped;
             try
             {
-                CloudBlob destinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
-                TransferTask = TransferManager.UploadAsync(file.FullName, destinationBlob, options, context, CT);
-                await TransferTask;
-                return true;
+                DestinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
+                FileSignature sig = new FileSignature(file);
+                SignatureTask = Task.Factory.StartNew(() => sig.Compute(), CT, TaskCreationOptions.None, TaskScheduler.Default);
+                TransferTask = TransferManager.UploadAsync(file.FullName, DestinationBlob, options, context, CT);
+                Task.WaitAll(TransferTask, SignatureTask);
+                SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.BlockBlob) as CloudBlockBlob;
+                CloudBlobStream signatureStream = await SignatureBlob.OpenWriteAsync();
             }
             catch (TaskCanceledException)
             {
@@ -200,13 +220,10 @@ namespace AzSync
             }
             finally
             {
-                CloseJournalStream();
+                CloseTransferJournal();
             }
-        }
 
-        private void Context_FileSkipped(object sender, TransferEventArgs e)
-        {
-            
+            return true;
         }
 
         protected async Task<bool> UploadMultipleFiles()
@@ -222,12 +239,48 @@ namespace AzSync
            ctx.LogLevel = LogLevel.Verbose;*/
             return true;
         }
-        protected async Task<bool> Download ()
+
+        protected async Task<bool> Download()
         {
             return await Task.FromResult(true);
         }
 
-        protected bool GetJournalStream()
+        protected async Task<bool> SyncLocalToRemote()
+        {
+            Contract.Requires(SourceFiles.Length > 0);
+            Contract.Requires(DestinationStorage != null);
+
+            if (SourceFiles.Length == 1)
+            {
+                return await SyncLocalSingleFileToRemote(SourceFiles[0]);
+            }
+            else return false;
+        }
+
+
+        protected async Task<bool> SyncRemoteToLocal()
+        {
+            return false;
+        }
+
+ 
+        protected async Task<bool> SyncLocalSingleFileToRemote(string fileName)
+        {
+            return true;
+        }
+
+        protected byte[] ComputeFileSignature(FileInfo file)
+        {
+            SignatureBuilder builder = new SignatureBuilder();
+            using (FileStream basisStream = file.OpenRead())
+            using (MemoryStream signatureStream = new MemoryStream())
+            {
+                builder.Build(basisStream, new OctoSigWriter(signatureStream));
+            }
+            return null;
+        }
+
+        protected bool OpenTransferJournal()
         {
             try
             {
@@ -258,7 +311,7 @@ namespace AzSync
             }
         }
 
-        protected void CloseJournalStream()
+        protected void CloseTransferJournal()
         {
             if (JournalStream != null)
             {
@@ -266,6 +319,7 @@ namespace AzSync
                 JournalStream.Dispose();
             }
         }
+
 
         private void Context_FileFailed(object sender, TransferEventArgs e)
         {
@@ -280,9 +334,18 @@ namespace AzSync
             
         }
 
+        private void Context_FileSkipped(object sender, TransferEventArgs e)
+        {
+            
+        }
+
         private void Context_FileTransferred(object sender, TransferEventArgs e)
         {
-            //L.Success(e.)
+            if (Operation == OperationType.COPY && this.Direction == TransferDirection.UP && SourceFiles.Length == 1)
+            {
+                DestinationBlob = (CloudBlockBlob)e.Destination;
+            }
+            L.Info("Transfer of file {file} completed in {millisec} seconds.", e.Source, (e.EndTime - e.StartTime).TotalMilliseconds);
         }
         #endregion
 
@@ -291,6 +354,7 @@ namespace AzSync
         public IConfigurationRoot AppConfig { get; protected set; }
         public Dictionary<string, object> EngineOptions { get; protected set; }
         public OperationType Operation { get; protected set; }
+        public TransferDirection Direction { get; protected set; }
         public string Source { get; protected set; }
         public Uri SourceUri { get; protected set; }
         public string SourceKey { get; protected set; }
@@ -299,6 +363,7 @@ namespace AzSync
         public string[] SourceFiles { get; protected set; }
         public DirectoryInfo SourceDirectory { get; protected set; }
         public AzStorage SourceStorage { get; protected set; }
+        public CloudBlob SourceBlob { get; protected set; }
         public string Destination { get; protected set; }
         public Uri DestinationUri { get; protected set; }
         public string DestinationKey { get; protected set; }
@@ -306,6 +371,7 @@ namespace AzSync
         public string DestinationContainerName { get; protected set; }
         public DirectoryInfo DestinationDirectory { get; protected set; }
         public AzStorage DestinationStorage { get; protected set; }
+        public CloudBlob DestinationBlob { get; protected set; }
         public string ContentType { get; protected set; }
         public int BlockSizeKB { get; protected set; }
         public int RetryCount { get; protected set; }
@@ -318,10 +384,12 @@ namespace AzSync
         public FileInfo JournalFile { get; protected set; }
         public Stream JournalStream { get; protected set; }
         public Task TransferTask { get; protected set; }
+        public Task SignatureTask { get; protected set; }
+        public CloudBlockBlob SignatureBlob { get; protected set; }
         #endregion
 
         #region Fields
-        protected Logger<SyncEngine> L = new Logger<SyncEngine>();
+        protected Logger<TransferEngine> L = new Logger<TransferEngine>();
         protected CancellationToken CT;
         #endregion
     }

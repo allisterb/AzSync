@@ -12,8 +12,15 @@ using Microsoft.WindowsAzure.Storage.DataMovement;
 
 namespace AzSync
 {
-    public class TransferProgressReporter : ILogging, IProgress<TransferStatus>
+    public class SingleFileUploadProgressReporter : ILogging, IProgress<TransferStatus>
     {
+        #region Constructors
+        public SingleFileUploadProgressReporter(FileInfo file) : base()
+        {
+            File = file;
+            markPosition = file.Length / 10;
+        }
+        #endregion
 
         #region Methods
         public void Report(TransferStatus progress)
@@ -26,20 +33,28 @@ namespace AzSync
             {
                 return;
             }
-            else
+            else if ((latestBytesTransferred >= mark * markPosition) && (latestBytesTransferred >= (mark + 1) * markPosition))
             {
+                ++mark;
                 L.Info("Transferred {0} bytes with {1} file transfer(s) completed, {2} skipped, {3} failed.", latestBytesTransferred, latestNumberOfFilesTransferred, latestNumberOfFilesSkipped, latestNumberOfFilesFailed);
+            }
+            else if (latestNumberOfFilesTransferred == 1)
+            {
+                L.Info("{0} file transfer(s) completed, {1} skipped, {2} failed.", latestNumberOfFilesTransferred, latestNumberOfFilesSkipped, latestNumberOfFilesFailed);
             }
         }
         #endregion
 
         #region Fields
-        protected Logger<SyncEngine> L = new Logger<SyncEngine>();
+        protected Logger<TransferEngine> L = new Logger<TransferEngine>();
+        protected FileInfo File;
         private long latestBytesTransferred;
         private long latestNumberOfFilesTransferred;
         private long latestNumberOfFilesSkipped;
         private long latestNumberOfFilesFailed;
         protected CancellationToken CT;
+        int mark = 0;
+        long markPosition;
         #endregion
     }
 }

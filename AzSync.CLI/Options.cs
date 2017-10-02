@@ -44,6 +44,8 @@ namespace AzSync.CLI
 
         [Option('j', "journal", HelpText = "The path and name of the local journal file to use during file transfers. This file is used to resume uploads or downloads that were interrupted. If you do not specify this then a default name will be used." )]
         public string JournalFilePath { get; set; }
+
+    
     }
 
     [Verb("copy", HelpText = "Copy files and folders between the local filesystem and Azure Storage without synchronization.")]

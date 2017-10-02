@@ -22,7 +22,7 @@ namespace AzSync
     public class AzStorage : ILogging
     {
         #region Constructors
-        public AzStorage(SyncEngine engine, string connString, bool rethrowExceptions = false)
+        public AzStorage(TransferEngine engine, string connString, bool rethrowExceptions = false)
         {
             this.Engine = engine;
             this.ConnectionString = connString;
@@ -36,7 +36,7 @@ namespace AzSync
         #endregion
 
         #region Properties
-        public SyncEngine Engine { get; protected set; }
+        public TransferEngine Engine { get; protected set; }
         public string ConnectionString { get; protected set; }
         public CloudStorageAccount StorageAccount { get; protected set; }
         public CloudBlobClient BlobClient { get; protected set; }
@@ -79,20 +79,20 @@ namespace AzSync
                 try
                 {
                     GetCloudBlobClient();
-                    CloudBlobContainer container = BlobClient.GetContainerReference(containerName);
-                    await container.CreateIfNotExistsAsync();
+                    CloudBlobContainer Container = BlobClient.GetContainerReference(containerName);
+                    await Container.CreateIfNotExistsAsync();
 
                     CloudBlob cloudBlob;
                     switch (blobType)
                     {
                         case BlobType.AppendBlob:
-                            cloudBlob = container.GetAppendBlobReference(blobName, snapshotTime);
+                            cloudBlob = Container.GetAppendBlobReference(blobName, snapshotTime);
                             break;
                         case BlobType.BlockBlob:
-                            cloudBlob = container.GetBlockBlobReference(blobName, snapshotTime);
+                            cloudBlob = Container.GetBlockBlobReference(blobName, snapshotTime);
                             break;
                         case BlobType.PageBlob:
-                            cloudBlob = container.GetPageBlobReference(blobName, snapshotTime);
+                            cloudBlob = Container.GetPageBlobReference(blobName, snapshotTime);
                             break;
                         case BlobType.Unspecified:
                         default:
