@@ -25,7 +25,8 @@ namespace AzSync.CLI
             INVALID_OPTIONS = 2,
             FILE_OR_DIRECTORY_NOT_FOUND = 3,
             TRANSFER_ENGINE_INIT_ERROR = 4,
-            TRANSFER_ERROR = 5
+            TRANSFER_ERROR = 5,
+            GENERATE_ERROR = 6
         }
 
         static Version Version = Assembly.GetExecutingAssembly().GetName().Version;
@@ -34,8 +35,10 @@ namespace AzSync.CLI
         static Logger<Program> L;
         static TransferEngine Engine;
         static Dictionary<string, object> EngineOptions = new Dictionary<string, object>(3);
+        static GenerateOptions GenerateOptions;
         static CancellationTokenSource CTS = new CancellationTokenSource();
         static Task<ExitResult> TransferTask;
+        static Task<ExitResult> GenerateTask;
         static Task ReadConsoleKeyTask;
 
         static void Main(string[] args)
@@ -70,7 +73,7 @@ namespace AzSync.CLI
             Log.Logger = LConfig.CreateLogger();
             L = new Logger<Program>();
 
-            ParserResult<object> result = new Parser().ParseArguments<Options, CopyOptions, SyncOptions>(args);
+            ParserResult<object> result = new Parser().ParseArguments<Options, GenerateOptions, CopyOptions, SyncOptions>(args);
             result.WithNotParsed((IEnumerable<Error> errors) =>
             {
                 if (errors.Any(e => e.Tag == ErrorType.VersionRequestedError))
@@ -107,7 +110,7 @@ namespace AzSync.CLI
                     HelpText help = GetAutoBuiltHelpText(result);
                     help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
                     help.Copyright = string.Empty;
-                    help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions));
+                    help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions), typeof(GenerateOptions));
                     L.Info(help);
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
@@ -186,7 +189,7 @@ namespace AzSync.CLI
                         Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
                     }
                     string[] files = Directory.GetFiles(o.Source, o.Pattern, o.Recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-                    L.Info("Matched {0} files to pattern {1} in directory {2}.", files.Length, o.Pattern, o.Source);
+                    L.Info("Matched {0} file(s) to pattern {1} in directory {2}.", files.Length, o.Pattern, o.Source);
                     if (files.Length > 0)
                     {
                         EngineOptions.Add("SourceFiles", files);
@@ -279,6 +282,11 @@ namespace AzSync.CLI
                     }
                 }
                 ExecuteTransferTasks();
+            })
+            .WithParsed((GenerateOptions o) =>
+            {
+                GenerateOptions = o;
+                ExecuteGenerateTasks();
             })
             .WithParsed((SyncOptions o) =>
             {
@@ -383,6 +391,69 @@ namespace AzSync.CLI
 
 
         }
+
+        static async Task<ExitResult> Generate(string fileName, int sizeMB, int averageSizeKB)
+        {
+            
+            if (!File.Exists(fileName))
+            {
+                await Generator.GenerateFile(CTS.Token, fileName, sizeMB, averageSizeKB);
+            }
+            else
+            {
+                await Generator.ModifyFile(CTS.Token, new FileInfo(fileName), sizeMB, averageSizeKB);
+            }
+            return ExitResult.SUCCESS;
+            
+        }
+
+        static void ExecuteGenerateTasks()
+        {
+            Task[] tasks = { GenerateTask = Generate(GenerateOptions.Name, GenerateOptions.SizeMB, GenerateOptions.PartSizeKB), ReadConsoleKeyTask = Task.Run(() => ReadConsoleKeys()) };
+            try
+            {
+                int c = Task.WaitAny(tasks, CTS.Token);
+                if (c == 0)
+                {
+                    Exit(GenerateTask.Result);
+                }
+                else
+                {
+                    L.Warn("Write operations to the file {file} were interrupted. The file may no longer be a valid archive and should be deleted and re-generated.");
+                    Exit(ExitResult.SUCCESS);
+                }
+            }
+            catch (AggregateException ae)
+            {
+                foreach (Exception e in ae.InnerExceptions)
+                {
+                    if (e is TaskCanceledException)
+                    {
+                        L.Info("Sync operation cancelled by user.");
+                        Exit(ExitResult.SUCCESS);
+                    }
+                    else if (e is IOException)
+                    {
+                        L.Error(e, "An I/O error occurred during generation of test file.");
+                        Exit(ExitResult.GENERATE_ERROR);
+                    }
+                    else
+                    {
+                        L.Error(e, "An unknown error occurred during generation of test file.");
+                        Exit(ExitResult.GENERATE_ERROR);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Exit(ExitResult.SUCCESS);
+            }
+            finally
+            {
+                CTS.Dispose();
+            }
+        }
+
         static void ReadConsoleKeys()
         {
             ConsoleKeyInfo cki = Console.ReadKey(true);

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.IO;
+using System.Net;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
@@ -47,7 +48,10 @@ namespace AzSync
             EngineOptions = engineOptions;
             AppConfig = configuration;
             CT = ct;
-            
+
+            ServicePointManager.DefaultConnectionLimit = Environment.ProcessorCount * 8;
+            ServicePointManager.Expect100Continue = false;
+
             foreach (PropertyInfo prop in this.GetType().GetProperties())
             {
                 if (EngineOptions.ContainsKey(prop.Name) && prop.CanWrite)
@@ -320,7 +324,6 @@ namespace AzSync
             }
         }
 
-
         private void Context_FileFailed(object sender, TransferEventArgs e)
         {
             if (CT.IsCancellationRequested)
@@ -346,6 +349,27 @@ namespace AzSync
                 DestinationBlob = (CloudBlockBlob)e.Destination;
             }
             L.Info("Transfer of file {file} completed in {millisec} seconds.", e.Source, (e.EndTime - e.StartTime).TotalMilliseconds);
+        }
+
+        public static string PrintBytes(double bytes)
+        {
+            if (bytes >= 0 && bytes <= 1024)
+            {
+                return string.Format("{0:N0} B/s", bytes);
+            }
+            else if (bytes >= 1024 && bytes < (1024 * 1024))
+            {
+                return string.Format("{0:N2} KB/s", bytes / 1024);
+            }
+            else if (bytes >= (1024 * 1024) && bytes < (1024 * 1024 * 1024))
+            {
+                return string.Format("{0:N2} MB/s", bytes / (1024 * 10124));
+            }
+            else if (bytes >= (1024 * 1024 * 1024))
+            {
+                return string.Format("{0:N2} GB/s", bytes / (1024 * 1024 * 1024));
+            }
+            else throw new ArgumentOutOfRangeException();
         }
         #endregion
 

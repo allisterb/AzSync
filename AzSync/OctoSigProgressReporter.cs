@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 
 using Octodiff.Diagnostics;
+
 namespace AzSync
 {
     public class OctoSigProgressReporter : IProgressReporter, ILogging
@@ -26,7 +27,7 @@ namespace AzSync
             else if ((currentPosition >= mark * markPosition) && (currentPosition >= (mark + 1) * markPosition))
             {
                 mark++;
-                L.Info("{operation} at current byte position {currentPosition}.", operation, currentPosition);
+                L.Info($"{operation}" + " for file {file} at current byte position {0}.", File.FullName, currentPosition);
             }
             
         }

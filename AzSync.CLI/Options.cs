@@ -18,7 +18,7 @@ namespace AzSync.CLI
         [Option('p', "pattern", HelpText = "The pattern to match file names against in the sync source or destination. Use the standard OS wildcards for local file or directory names if specifying a local sync source.", Default = "*")]
         public string Pattern { get; set; }
 
-        [Option('R', "recurse", HelpText = "Recurse into lower level sub-directories when searching for local file or directory names that match a pattern.", Default = false)]
+        [Option('S', "recurse", HelpText = "Recurse into lower level sub-directories when searching for local file or directory names that match a pattern.", Default = false)]
         public bool Recurse { get; set; }
 
         [Option('r', "retry-count", HelpText = "The number of times to retry an Azure Storage operation which does not complete successfully.", Default = 3)]
@@ -59,5 +59,18 @@ namespace AzSync.CLI
     class SyncOptions : Options
     {
 
+    }
+
+    [Verb("generate", HelpText = "Generate a file for testing AzSync with your Azure Storage account.")]
+    class GenerateOptions : Options
+    {
+        [Option("name", Required = true, HelpText = "The name of the test file to generate or modify.")]
+        public string Name { get; set; }
+
+        [Option("size",  Required = true, HelpText = "Set the size in MB of the test file to the specified value. If the file exists then it will be modified.")]
+        public int SizeMB { get; set; }
+
+        [Option("part-size", Required = false, Default = 100, HelpText = "Set the average size in KB of each part of the test file. Default is 100.")]
+        public int PartSizeKB { get; set; }
     }
 }

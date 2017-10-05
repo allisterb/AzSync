@@ -29,6 +29,7 @@ namespace AzSync
             this.latestNumberOfFilesTransferred = progress.NumberOfFilesTransferred;
             this.latestNumberOfFilesSkipped = progress.NumberOfFilesSkipped;
             this.latestNumberOfFilesFailed = progress.NumberOfFilesFailed;
+            TimeSpan elapsed = DateTime.Now - lastTime;
             if (latestBytesTransferred == 0 && latestNumberOfFilesFailed == 0 && latestNumberOfFilesSkipped == 0 && latestNumberOfFilesTransferred == 0)
             {
                 return;
@@ -36,7 +37,7 @@ namespace AzSync
             else if ((latestBytesTransferred >= mark * markPosition) && (latestBytesTransferred >= (mark + 1) * markPosition))
             {
                 ++mark;
-                L.Info("Transferred {0} bytes with {1} file transfer(s) completed, {2} skipped, {3} failed.", latestBytesTransferred, latestNumberOfFilesTransferred, latestNumberOfFilesSkipped, latestNumberOfFilesFailed);
+                L.Info("Transferred {0} bytes for 1 file. Transfer rate: {1}", latestBytesTransferred, TransferEngine.PrintBytes(latestBytesTransferred / elapsed.TotalSeconds));
             }
             else if (latestNumberOfFilesTransferred == 1)
             {
@@ -55,6 +56,7 @@ namespace AzSync
         protected CancellationToken CT;
         int mark = 0;
         long markPosition;
+        DateTime lastTime;
         #endregion
     }
 }

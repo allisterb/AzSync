@@ -30,7 +30,7 @@ namespace AzSync
         #region Methods
         public byte[] Compute()
         {
-            using (Operation op = L.Begin("Build file signature for file {file}", File.FullName))
+            using (Operation op = L.Begin("Build file signatures for file {file}", File.FullName))
             {
                 using (FileStream basisStream = File.Open(FileMode.Open, FileAccess.Read, FileShare.Read))
                 using (MemoryStream ms = new MemoryStream())
