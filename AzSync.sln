@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.26730.3
+VisualStudioVersion = 15.0.26730.16
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AzSync", "AzSync\AzSync.csproj", "{448799CC-1236-4E72-9935-6612766C30FF}"
 EndProject
@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		azsync.cmd = azsync.cmd
 	EndProjectSection
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.WindowsAzure.Storage.DataMovement", "azure-storage-net-data-movement\netcore\Microsoft.WindowsAzure.Storage.DataMovement\Microsoft.WindowsAzure.Storage.DataMovement.csproj", "{493A57AE-C9D1-4AE4-8BD0-291486EF04D0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -38,6 +40,10 @@ Global
 		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{186BFD2F-8EC0-48EE-8F55-02144B1FE342}.Release|Any CPU.Build.0 = Release|Any CPU
+		{493A57AE-C9D1-4AE4-8BD0-291486EF04D0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{493A57AE-C9D1-4AE4-8BD0-291486EF04D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{493A57AE-C9D1-4AE4-8BD0-291486EF04D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{493A57AE-C9D1-4AE4-8BD0-291486EF04D0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
