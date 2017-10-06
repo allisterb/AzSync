@@ -370,6 +370,7 @@ namespace AzSync
                 return string.Format("{0:N2} GB/s", bytes / (1024 * 1024 * 1024));
             }
             else throw new ArgumentOutOfRangeException();
+            
         }
         #endregion
 
