@@ -53,7 +53,7 @@ namespace AzSync.CLI
                 .MinimumLevel.Verbose()
                 .Enrich.FromLogContext()
                 .Enrich.WithThreadId()
-                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {SourceContext}: {Message}{NewLine}");
+                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] [{SourceContext}] {Message}{NewLine}{Exception}");
             }
             else
             {
@@ -61,7 +61,7 @@ namespace AzSync.CLI
                 .MinimumLevel.Debug()
                 .Enrich.FromLogContext()
                 .Enrich.WithThreadId()
-                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {Message}{NewLine}");
+                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {Message}{NewLine}{Exception}");
             }
 
             IConfigurationBuilder builder = new ConfigurationBuilder()
@@ -116,7 +116,7 @@ namespace AzSync.CLI
                 }
                 else if (errors.Any(e => e.Tag == ErrorType.UnknownOptionError))
                 {
-                    UnknownOptionError error = (UnknownOptionError)errors.First(e => e.Tag == ErrorType.NoVerbSelectedError);
+                    UnknownOptionError error = (UnknownOptionError)errors.First(e => e.Tag == ErrorType.UnknownOptionError);
                     HelpText help = GetAutoBuiltHelpText(result);
                     help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
                     help.Copyright = string.Empty;
@@ -133,7 +133,7 @@ namespace AzSync.CLI
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
             })
-            .WithParsed((Options o) =>
+            .WithParsed((TransferOptions o) =>
             {
                 o.Source = string.IsNullOrEmpty(AppConfig["Source"]) ? o.Source : AppConfig["Source"];
                 o.SourceKey = string.IsNullOrEmpty(AppConfig["SourceKey"]) ? o.SourceKey : AppConfig["SourceKey"];
@@ -374,7 +374,7 @@ namespace AzSync.CLI
                     }
                     else
                     {
-                        L.Error(e, "An unknown error occurred during program execution");
+                        L.Error(e, "An error occurred during the transfer operation.");
                         Exit(ExitResult.UNHANDLED_EXCEPTION);
                     }
                 }

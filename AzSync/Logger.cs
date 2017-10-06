@@ -80,7 +80,7 @@ namespace AzSync
         [DebuggerStepThrough]
         public Operation Begin(string messageTemplate, params object[] args)
         {
-            Debug(messageTemplate + "...", args);
+            Verbose(messageTemplate + "...", args);
             return L.BeginOperation(messageTemplate, args);
         }
         #endregion

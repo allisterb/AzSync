@@ -9,6 +9,13 @@ namespace AzSync.CLI
 {
     class Options
     {
+        [Option("verbose", HelpText = "Enable verbose logging.", Default = false)]
+        public bool Verbose { get; set; }
+
+    }
+
+    class TransferOptions : Options
+    {
         [Option('s', "source", HelpText = "The Azure Storage resource or local directory that will be the sync source. For an Azure Storage resource you must use your Blob Service endpoint Uri.")]
         public string Source { get; set; }
 
@@ -33,6 +40,9 @@ namespace AzSync.CLI
         [Option("dest-key", HelpText = "The account key for accessing the destination Azure Storage resource.")]
         public string DestinationKey { get; set; }
 
+        [Option("overwrite", HelpText = "Overwrite existing destination Azure Storage objects or local files or directories during a copy operation.", Default = false)]
+        public bool Overwrite { get; protected set; }
+
         [Option("use-emulator", HelpText = "Use the Azure Storage emulator installed on the local machine.", Default = false)]
         public bool UseStorageEmulator { get; set; }
 
@@ -42,21 +52,19 @@ namespace AzSync.CLI
         [Option("content-type", HelpText = "The content-type to set destination Azure Storage blobs to.")]
         public string ContentType { get; set; }
 
-        [Option('j', "journal", HelpText = "The path and name of the local journal file to use during file transfers. This file is used to resume uploads or downloads that were interrupted. If you do not specify this then a default name will be used." )]
+        [Option('j', "journal", HelpText = "The path and name of the local journal file to use during file transfers. This file is used to resume uploads or downloads that were interrupted. If you do not specify this then a default name will be used.")]
         public string JournalFilePath { get; set; }
 
-    
     }
 
     [Verb("copy", HelpText = "Copy files and folders between the local filesystem and Azure Storage without synchronization.")]
-    class CopyOptions : Options
+    class CopyOptions : TransferOptions
     {
-        [Option("overwrite", HelpText = "Overwrite existing destination Azure Storage objects or local files or directories during a copy operation.", Default = false)]
-        public bool Overwrite { get; protected set; }
+        
     }
 
     [Verb("sync", HelpText = "Synchronize files and folders between the local filesystem and Azure Storage.")]
-    class SyncOptions : Options
+    class SyncOptions : TransferOptions
     {
 
     }
