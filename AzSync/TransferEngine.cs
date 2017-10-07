@@ -286,13 +286,25 @@ namespace AzSync
 
         protected bool OpenTransferJournal()
         {
+            Contract.Requires(!string.IsNullOrEmpty(JournalFilePath));
             try
             {
                 JournalFile = new FileInfo(JournalFilePath);
                 if (JournalFile.Exists)
                 {
-                    L.Info("Resuming transfer from journal file {file}.", JournalFile.FullName);
-                    JournalStream = JournalFile.Open(FileMode.Open, FileAccess.ReadWrite);
+                    if (DeleteJournal)
+                    {
+                        JournalFile.Delete();
+                        L.Info("Deleted existing journal file {file}.", JournalFilePath);
+                        JournalFile = new FileInfo(JournalFilePath);
+                        JournalStream = JournalFile.Open(FileMode.CreateNew, FileAccess.ReadWrite);
+                        L.Info("Created new journal file {file}.", JournalFile.FullName);
+                    }
+                    else
+                    {
+                        JournalStream = JournalFile.Open(FileMode.Open, FileAccess.ReadWrite);
+                        L.Info("Resuming transfer from journal file {file}.", JournalFile.FullName);
+                    }
                 }
                 else
                 {
@@ -407,6 +419,8 @@ namespace AzSync
         public bool UseStorageEmulator { get; protected set; }
         public string JournalFilePath { get; protected set; }
         public FileInfo JournalFile { get; protected set; }
+        public bool NoJournal { get; protected set; }
+        public bool DeleteJournal { get; protected set; }
         public Stream JournalStream { get; protected set; }
         public Task TransferTask { get; protected set; }
         public Task SignatureTask { get; protected set; }

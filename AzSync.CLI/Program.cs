@@ -351,7 +351,6 @@ namespace AzSync.CLI
             Task[] tasks = { TransferTask = Transfer(), ReadConsoleKeyTask = Task.Run(() => ReadConsoleKeys()) };
             try
             {
-
                 int c = Task.WaitAny(tasks, CTS.Token);
                 if (c == 0)
                 {

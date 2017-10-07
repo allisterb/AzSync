@@ -1,3 +1,7 @@
 [submodule "Octodiff"]
 	path = Octodiff
 	url = https://github.com/OctopusDeploy/Octodiff.git
+    
+[submodule "azure-storage-net-data-movement"]
+	path = azure-storage-net-data-movement
+	url = https://github.com/allisterb/azure-storage-net-data-movement.git
