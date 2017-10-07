@@ -55,7 +55,7 @@ namespace AzSync.CLI
         [Option('j', "journal", HelpText = "The path and name of the local transfer journal file to use during file transfers. This file is used to resume uploads or downloads that were interrupted. If you do not specify this then a default name will be used.")]
         public string JournalFilePath { get; set; }
 
-        [Option("no-journal", HelpText = "Do not use a local transfer journal during transfer. If a journal file for the transfer exists then it will be deleted.")]
+        [Option("no-journal", HelpText = "Do not use a local transfer journal during transfer. If a previous journal file for the transfer exists then it will be deleted.")]
         public bool NoJournal { get; set; }
 
         [Option("delete-journal", HelpText = "Delete any existing local transfer journal file before transfer. A new journal file for the transfer will be created unless the --no-journal option is also specified.")]

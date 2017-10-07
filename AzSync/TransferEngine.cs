@@ -292,13 +292,20 @@ namespace AzSync
                 JournalFile = new FileInfo(JournalFilePath);
                 if (JournalFile.Exists)
                 {
-                    if (DeleteJournal)
+                    if (NoJournal || DeleteJournal)
                     {
                         JournalFile.Delete();
                         L.Info("Deleted existing journal file {file}.", JournalFilePath);
-                        JournalFile = new FileInfo(JournalFilePath);
-                        JournalStream = JournalFile.Open(FileMode.CreateNew, FileAccess.ReadWrite);
-                        L.Info("Created new journal file {file}.", JournalFile.FullName);
+                        if (!NoJournal)
+                        {
+                            JournalFile = new FileInfo(JournalFilePath);
+                            JournalStream = JournalFile.Open(FileMode.CreateNew, FileAccess.ReadWrite);
+                            L.Info("Created new journal file {file}.", JournalFile.FullName);
+                        }
+                        else
+                        {
+                            JournalStream = new MemoryStream();
+                        }
                     }
                     else
                     {
@@ -308,8 +315,8 @@ namespace AzSync
                 }
                 else
                 {
-                    L.Info("Creating journal file {file} for transfer.", JournalFile.FullName);
                     JournalStream = JournalFile.Open(FileMode.CreateNew, FileAccess.ReadWrite);
+                    L.Info("Created journal file {file} for transfer.", JournalFile.FullName);
                 }
                 return true;
             }

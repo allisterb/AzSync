@@ -64,11 +64,13 @@ namespace AzSync
         [DebuggerStepThrough]
         public void Error(Exception exception, string messageTemplate, params object[] propertyValues)
         {
+            L.Error(exception, messageTemplate, propertyValues);
+            /*
             if (exception.InnerException != null)
             {
-                L.Error(exception.InnerException, messageTemplate, propertyValues);
+                L.Error(exception.InnerException, "Inner exception:");
             }
-            L.Error(exception, messageTemplate, propertyValues);
+            */
         }
 
         [DebuggerStepThrough]

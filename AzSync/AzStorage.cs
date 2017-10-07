@@ -103,25 +103,25 @@ namespace AzSync
                 }
                 catch (StorageException se)
                 {
-                    L.Error(se, "Storage error occurred getting Azure Storage blob {bn} in container {cn}.", blobName, containerName);
                     if (RethrowExceptions)
                     {
                         throw se;
                     }
                     else
                     {
+                        L.Error(se, "A storage error occurred getting Azure Storage blob {bn} in container {cn}.", blobName, containerName);
                         return null;
                     }
                 }
                 catch (Exception e)
                 {
-                    L.Error(e, "Error occurred getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
                     if (RethrowExceptions)
                     {
                         throw e;
                     }
                     else
                     {
+                        L.Error(e, "An error occurred getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
                         return null;
                     }
                 }
@@ -150,25 +150,25 @@ namespace AzSync
                 }
                 catch (StorageException se)
                 {
-                    L.Error(se, "Storage error occurred getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
                     if (RethrowExceptions)
                     {
                         throw se;
                     }
                     else
                     {
+                        L.Error(se, "A storage error occurred getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
                         return null;
                     }
                 }
                 catch (Exception e)
                 {
-                    L.Error(e, "Exception thrown getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
                     if (RethrowExceptions)
                     {
                         throw e;
                     }
                     else
                     {
+                        L.Error(e, "An error occurred getting Azure Storage directory {dn} from container {cn}.", directoryName, containerName);
                         return null;
                     }
                 }
@@ -198,25 +198,25 @@ namespace AzSync
                 }
                 catch (StorageException se)
                 {
-                    L.Error(se, "Storage exception thrown getting Azure Storage file {fn} from share {sn}.", fileName, shareName);
                     if (RethrowExceptions)
                     {
                         throw se;
                     }
                     else
                     {
+                        L.Error(se, "A storage error occurred getting Azure Storage file {fn} from share {sn}.", fileName, shareName);
                         return null;
                     }
                 }
                 catch (Exception e)
                 {
-                    L.Error(e, "Exception thrown getting Azure Storage file {fn} from share {sn}.", fileName, shareName);
                     if (RethrowExceptions)
                     {
                         throw e;
                     }
                     else
                     {
+                        L.Error(e, "An error occurred getting Azure Storage file {fn} from share {sn}.", fileName, shareName);
                         return null;
                     }
                 }
@@ -238,6 +238,7 @@ namespace AzSync
                     await share.DeleteIfExistsAsync();
                     azOp.Complete();
                 }
+
                 catch (Exception e)
                 {
                     L.Error(e, "Exception throw deleting Azure Storage share {sn}.", shareName);
