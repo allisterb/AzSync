@@ -187,16 +187,21 @@ namespace AzSync
             try
             {
                 DestinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
-                FileSignature sig = new FileSignature(file);
-                SignatureTask = Task.Factory.StartNew(() => sig.Compute(), CT, TaskCreationOptions.None, TaskScheduler.Default);
+                SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.AppendBlob) as CloudAppendBlob;
+                SingleFileSignature signature = new SingleFileSignature(file, DestinationBlob);
+                SignatureTask = Task.Factory.StartNew(() => signature.Compute(), CT, TaskCreationOptions.None, TaskScheduler.Default);
                 TransferTask = TransferManager.UploadAsync(file.FullName, DestinationBlob, options, context, CT);
                 Task.WaitAll(TransferTask, SignatureTask);
-                SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.BlockBlob) as CloudBlockBlob;
-                CloudBlobStream signatureStream = await SignatureBlob.OpenWriteAsync();
+                L.Info("File signature has length {0} bytes.", signature.OctoSignature.Length);
+                if (!await UploadSingleFileSignature(signature, SignatureBlob))
+                {
+                    L.Error("An error occurred during the file signature upload.");
+                }
+                return true;
             }
             catch (TaskCanceledException)
             {
-                L.Info("The upload operation was cancelled.");
+                L.Info("The file upload operation was cancelled.");
                 return true;
             }
             catch (OperationCanceledException)
@@ -230,6 +235,79 @@ namespace AzSync
             return true;
         }
 
+        protected async Task<bool> UploadSingleFileSignature(SingleFileSignature signature, CloudAppendBlob signatureBlob)
+        {
+            UploadOptions options = new UploadOptions();
+            SingleTransferContext context = new SingleTransferContext();
+            context.LogLevel = LogLevel.Informational;
+            context.ProgressHandler = new SignatureUploadProgressReporter(signature);
+            bool transferred = false;
+            context.SetAttributesCallback = (destination) =>
+            {
+                SignatureBlob = destination as CloudAppendBlob;
+                SignatureBlob.Properties.ContentType = "application/octet-stream";
+            };
+            context.ShouldOverwriteCallback = (source, destination) =>
+            {
+                return true;
+            };
+            context.FileTransferred += (source, e) =>
+            {
+                transferred = true;
+            };
+            context.FileFailed += (source, e) =>
+            {
+                transferred = false;
+            };
+            context.FileSkipped += (source, e) =>
+            {
+                transferred = false;
+            };
+            try
+            {
+                BinaryFormatter formatter = new BinaryFormatter();
+                formatter.Serialize(SignatureStream, signature);
+                await TransferManager.UploadAsync(SignatureStream, signatureBlob, options, context, CT);
+                return transferred;
+            }
+            catch (TaskCanceledException)
+            {
+                L.Info("The signature upload operation was cancelled.");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                L.Info("The sinature upload operation was cancelled.");
+                return true;
+            }
+            catch (StorageException se)
+            {
+                L.Error(se, $"A storage error occurred attempting to upload the file signature for {signature.File.FullName} to cloud block blob {signatureBlob.Name} in container {DestinationContainerName}");
+                return false;
+            }
+            catch (TransferException te)
+            {
+                if (CT.IsCancellationRequested)
+                {
+                    L.Info("The signature upload operation was cancelled by the user.");
+                    return true;
+                }
+                else
+                {
+                    L.Error(te, $"A storage error occurred attempting to upload the file signature for {signature.File.FullName} to cloud block blob {signatureBlob.Name} in container {DestinationContainerName}");
+                    return false;
+                }
+            }
+            catch (SerializationException sere)
+            {
+                L.Error(sere, $"An error occurred serializing the signature for file {signature.File.FullName}.");
+                return false;
+            }
+            finally
+            {
+              
+            }
+        }
         protected async Task<bool> UploadMultipleFiles()
         {
             /*
@@ -279,7 +357,7 @@ namespace AzSync
             using (FileStream basisStream = file.OpenRead())
             using (MemoryStream signatureStream = new MemoryStream())
             {
-                builder.Build(basisStream, new OctoSigWriter(signatureStream));
+                builder.Build(basisStream, new SignatureWriter(signatureStream));
             }
             return null;
         }
@@ -396,6 +474,7 @@ namespace AzSync
         #region Properties
         public bool Initialised { get; protected set; } = false;
         public IConfigurationRoot AppConfig { get; protected set; }
+        public CancellationToken CT { get; protected set; }
         public Dictionary<string, object> EngineOptions { get; protected set; }
         public OperationType Operation { get; protected set; }
         public TransferDirection Direction { get; protected set; }
@@ -431,12 +510,12 @@ namespace AzSync
         public Stream JournalStream { get; protected set; }
         public Task TransferTask { get; protected set; }
         public Task SignatureTask { get; protected set; }
-        public CloudBlockBlob SignatureBlob { get; protected set; }
+        public CloudAppendBlob SignatureBlob{ get; protected set; }
+        public MemoryStream SignatureStream { get; protected set; } = new MemoryStream();
         #endregion
 
         #region Fields
         protected Logger<TransferEngine> L = new Logger<TransferEngine>();
-        protected CancellationToken CT;
         #endregion
     }
 }

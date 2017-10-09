@@ -6,7 +6,9 @@ namespace AzSync
 {
     using System;
     using System.Diagnostics.Contracts;
+    using System.IO;
     using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
 
     using Microsoft.WindowsAzure.Storage;
@@ -37,6 +39,7 @@ namespace AzSync
 
         #region Properties
         public TransferEngine Engine { get; protected set; }
+        public CancellationToken CT { get; protected set; }
         public string ConnectionString { get; protected set; }
         public CloudStorageAccount StorageAccount { get; protected set; }
         public CloudBlobClient BlobClient { get; protected set; }
@@ -221,6 +224,13 @@ namespace AzSync
                     }
                 }
             }
+        }
+
+        public async Task<CloudBlobStream> OpenAppendBlobWriteStream(CloudAppendBlob blob)
+        {
+            BlobRequestOptions requestOptions = new BlobRequestOptions();
+            OperationContext ctx = new OperationContext();
+            return await blob.OpenWriteAsync(true, AccessCondition.GenerateEmptyCondition(), requestOptions, ctx, Engine.CT);
         }
 
         /// <summary>

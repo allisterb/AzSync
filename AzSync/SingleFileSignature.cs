@@ -13,18 +13,22 @@ using Octodiff.Core;
 namespace AzSync
 {
     [Serializable]
-    public class FileSignature : ILogging
+    public class SingleFileSignature : ILogging
     {
         #region Constructors
-        public FileSignature(FileInfo file)
+        public SingleFileSignature(FileInfo file, CloudBlob blob)
         {
             File = file;
+            FileBlob = blob;
+            FileName = File.Name;
+            FilePath = File.FullName;
+            Size = File.Length;
+            ETag = blob.Properties.ETag;
         }
         #endregion
 
         #region Properties
         public bool Build { get; protected set; }
-        protected Logger<TransferEngine> L = new Logger<TransferEngine>();
         #endregion
 
         #region Methods
@@ -35,26 +39,32 @@ namespace AzSync
                 using (FileStream basisStream = File.Open(FileMode.Open, FileAccess.Read, FileShare.Read))
                 using (MemoryStream ms = new MemoryStream())
                 {
-                    OctoSigWriter octoSigWriter = new OctoSigWriter(ms);
+                    SignatureWriter octoSigWriter = new SignatureWriter(ms);
                     SignatureBuilder signatureBuilder = new SignatureBuilder();
                     signatureBuilder.ProgressReporter = new OctoSigProgressReporter(File);
                     signatureBuilder.Build(basisStream, octoSigWriter);
                     op.Complete();
-                    return OctoSig = ms.ToArray();
+                    return OctoSignature = ms.ToArray();
                 }
-
             }
         }
         #endregion
-        
+
         #region Fields
         [NonSerialized]
+        protected Logger<TransferEngine> L = new Logger<TransferEngine>();
+        [NonSerialized]
         public FileInfo File;
+        [NonSerialized]
+        public CloudBlob FileBlob;
+        public string FileName;
+        public string FilePath;
         public string UserName;
         public string ComputerName;
         public string ETag;
         public long Size;
-        public byte[] OctoSig;
+        public byte[] FileHash;
+        public byte[] OctoSignature;
         #endregion
     }
 }
