@@ -49,9 +49,6 @@ namespace AzSync
             AppConfig = configuration;
             CT = ct;
 
-            ServicePointManager.DefaultConnectionLimit = Environment.ProcessorCount * 8;
-            ServicePointManager.Expect100Continue = false;
-
             foreach (PropertyInfo prop in this.GetType().GetProperties())
             {
                 if (EngineOptions.ContainsKey(prop.Name) && prop.CanWrite)
@@ -61,6 +58,8 @@ namespace AzSync
             }
 
             TransferManager.Configurations.BlockSize = this.BlockSizeKB * 1024;
+            ServicePointManager.DefaultConnectionLimit = Environment.ProcessorCount * 8;
+            ServicePointManager.Expect100Continue = false;
 
             if (this.Operation == OperationType.COPY)
             {
@@ -73,7 +72,7 @@ namespace AzSync
                     string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(DestinationUri, DestinationKey);
                     if (string.IsNullOrEmpty(cs))
                     {
-                        L.Error("Could not determine the Azure Storage connection string.");
+                        L.Error("Could not determine the destination Azure Storage connection string.");
                         return;
                     }
                     else
@@ -86,7 +85,7 @@ namespace AzSync
                         }
                         else
                         {
-                            this.Initialised = true;
+                            Initialised = true;
                             Direction = TransferDirection.UP;
                         }
                     }
@@ -98,7 +97,7 @@ namespace AzSync
                     string cs = UseStorageEmulator ? "UseDevelopmentStorage=true" : AzStorage.GetConnectionString(SourceUri, SourceKey);
                     if (string.IsNullOrEmpty(cs))
                     {
-                        L.Error("Could not determine the Azure Storage connection string.");
+                        L.Error("Could not determine the source Azure Storage connection string.");
                         return;
                     }
                     else
@@ -166,6 +165,10 @@ namespace AzSync
             {
                 JournalFilePath = file.FullName + ".azsj";
             }
+            if (string.IsNullOrEmpty(SignatureFilePath))
+            {
+                SignatureFilePath = file.FullName + ".sig";
+            }
             OpenTransferJournal();
             UploadOptions options = new UploadOptions();
             SingleTransferContext context = new SingleTransferContext(JournalStream);
@@ -188,42 +191,32 @@ namespace AzSync
             {
                 DestinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
                 SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.AppendBlob) as CloudAppendBlob;
-                SingleFileSignature signature = new SingleFileSignature(file, DestinationBlob);
-                SignatureTask = Task.Factory.StartNew(() => signature.Compute(), CT, TaskCreationOptions.None, TaskScheduler.Default);
-                TransferTask = TransferManager.UploadAsync(file.FullName, DestinationBlob, options, context, CT);
-                Task.WaitAll(TransferTask, SignatureTask);
-                L.Info("File signature has length {0} bytes.", signature.OctoSignature.Length);
-                if (!await UploadSingleFileSignature(signature, SignatureBlob))
+                using (Operation azOp = L.Begin("Upload file and compute file signature"))
                 {
-                    L.Error("An error occurred during the file signature upload.");
+                    Signature = new SingleFileSignature(file, DestinationBlob);
+                    ComputeSignatureTask = Task.Factory.StartNew(() => Signature.Compute(), CT, TaskCreationOptions.None, TaskScheduler.Default);
+                    TransferTask = TransferManager.UploadAsync(file.FullName, DestinationBlob, options, context, CT);
+                    Task.WaitAll(TransferTask, ComputeSignatureTask);
+                    if (TransferTask.Status == TaskStatus.RanToCompletion && ComputeSignatureTask.Status == TaskStatus.RanToCompletion)
+                    {
+                        L.Info("File signature has length {0} bytes.", Signature.OctoSignature.Length);
+                        azOp.Complete();
+                    }
+                    else
+                    {
+                        return false;
+                    }
                 }
-                return true;
             }
-            catch (TaskCanceledException)
+            catch (Exception e)
             {
-                L.Info("The file upload operation was cancelled.");
-                return true;
-            }
-            catch (OperationCanceledException)
-            {
-                L.Info("The upload operation was cancelled.");
-                return true;
-            }
-            catch (StorageException se)
-            {
-                L.Error(se, $"A storage error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
-                return false;
-            }
-            catch (TransferException te)
-            {
-                if (CT.IsCancellationRequested)
+                LogTransferException(e, "upload file and compute file signature");
+                if (e is TaskCanceledException || e is OperationCanceledException)
                 {
-                    L.Info("The upload operation was cancelled by the user.");
                     return true;
                 }
                 else
                 {
-                    L.Error(te, $"A transfer error occurred attempting to upload file {file.Name} to a cloud block blob in container {DestinationContainerName}");
                     return false;
                 }
             }
@@ -232,16 +225,88 @@ namespace AzSync
                 CloseTransferJournal();
             }
 
+            using (Operation azOp = L.Begin("Upload and write file signature to disk"))
+            {
+                SignatureFile = new FileInfo(file.FullName + ".sig");
+                WriteSignatureTask = WriteSignatureToFile();
+                UploadSignatureTask = UploadSignature();
+                try
+                {
+                    await WriteSignatureTask;
+                    if (WriteSignatureTask.IsCompleted)
+                    {
+                        await UploadSignatureTask;
+                        azOp.Complete();
+                    }
+                    else
+                    {
+                        azOp.Cancel();
+                    }
+                }
+                catch (Exception e)
+                {
+                    LogTransferException(e, "upload and write file signature to disk");
+                    azOp.Cancel();
+                    if (e is TaskCanceledException || e is OperationCanceledException)
+                    {
+                        return true;
+                    }
+
+                }
+            }
             return true;
         }
 
-        protected async Task<bool> UploadSingleFileSignature(SingleFileSignature signature, CloudAppendBlob signatureBlob)
+        protected async Task<bool> WriteSignatureToFile()
+        {
+            bool wrote = false;
+            using (Operation azOp = L.Begin("Write signature to file {file}.", SignatureFile.FullName))
+            {
+                try
+                {
+                    if (SignatureFile.Exists)
+                    {
+                        L.Warn("The existing signature file {file} will be overwritten.", SignatureFile.FullName);
+                    }
+                    SignatureStream = SignatureFile.Open(FileMode.CreateNew, FileAccess.Write);
+                    BinaryFormatter formatter = new BinaryFormatter();
+                    formatter.Serialize(SignatureStream, Signature);
+                    await SignatureStream.FlushAsync().ContinueWith((t) =>
+                    {
+                        if (t.IsCompleted)
+                        {
+                            wrote = true;
+                        }
+                        else
+                        {
+                            wrote = false;
+                        }
+                    });
+                    wrote = true;
+                }
+                catch (Exception e)
+                {
+                    LogTransferException(e, $"write signature to file {SignatureFile.FullName}");
+                    wrote = false;
+                }
+                finally
+                {
+                    if (SignatureStream != null)
+                    {
+                        SignatureStream.Dispose();
+                    }
+                }
+            }
+            return wrote;
+        }
+
+        protected async Task<bool> UploadSignature()
         {
             UploadOptions options = new UploadOptions();
             SingleTransferContext context = new SingleTransferContext();
-            context.LogLevel = LogLevel.Informational;
-            context.ProgressHandler = new SignatureUploadProgressReporter(signature);
             bool transferred = false;
+            context.LogLevel = LogLevel.Informational;
+            context.ProgressHandler = new SignatureUploadProgressReporter(SignatureFile);
             context.SetAttributesCallback = (destination) =>
             {
                 SignatureBlob = destination as CloudAppendBlob;
@@ -263,51 +328,27 @@ namespace AzSync
             {
                 transferred = false;
             };
+
             try
             {
-                BinaryFormatter formatter = new BinaryFormatter();
-                formatter.Serialize(SignatureStream, signature);
-                await TransferManager.UploadAsync(SignatureStream, signatureBlob, options, context, CT);
-                return transferred;
+                await TransferManager.UploadAsync(SignatureFile.FullName, SignatureBlob, options, context, CT);
+                transferred = true;
             }
-            catch (TaskCanceledException)
+            catch (Exception e)
             {
-                L.Info("The signature upload operation was cancelled.");
-                return true;
-            }
-            catch (OperationCanceledException)
-            {
-                L.Info("The sinature upload operation was cancelled.");
-                return true;
-            }
-            catch (StorageException se)
-            {
-                L.Error(se, $"A storage error occurred attempting to upload the file signature for {signature.File.FullName} to cloud block blob {signatureBlob.Name} in container {DestinationContainerName}");
-                return false;
-            }
-            catch (TransferException te)
-            {
-                if (CT.IsCancellationRequested)
+                LogTransferException(e, $"upload signature to cloud blob {SignatureBlob.Name}");
+                if (e is OperationCanceledException || e is TaskCanceledException || (e is TransferException && CT.IsCancellationRequested))
                 {
-                    L.Info("The signature upload operation was cancelled by the user.");
-                    return true;
+                    transferred = true;
                 }
                 else
                 {
-                    L.Error(te, $"A storage error occurred attempting to upload the file signature for {signature.File.FullName} to cloud block blob {signatureBlob.Name} in container {DestinationContainerName}");
-                    return false;
+                    transferred = false;
                 }
             }
-            catch (SerializationException sere)
-            {
-                L.Error(sere, $"An error occurred serializing the signature for file {signature.File.FullName}.");
-                return false;
-            }
-            finally
-            {
-              
-            }
+            return transferred;
         }
+
         protected async Task<bool> UploadMultipleFiles()
         {
             /*
@@ -319,7 +360,7 @@ namespace AzSync
            };
            DirectoryTransferContext ctx = new DirectoryTransferContext();
            ctx.LogLevel = LogLevel.Verbose;*/
-            return true;
+            return await Task.FromResult(true);
         }
 
         protected async Task<bool> Download()
@@ -351,7 +392,7 @@ namespace AzSync
             return true;
         }
 
-        protected byte[] ComputeFileSignature(FileInfo file)
+        protected byte[] ComputeSignature(FileInfo file)
         {
             SignatureBuilder builder = new SignatureBuilder();
             using (FileStream basisStream = file.OpenRead())
@@ -421,6 +462,33 @@ namespace AzSync
             }
         }
 
+        protected void LogTransferException(Exception e, string operationDescription)
+        {
+            if (e is TaskCanceledException || e is OperationCanceledException)
+            {
+                L.Info($"The {operationDescription} operation was cancelled.");
+            }
+            else if (e is StorageException)
+            {
+                L.Error(e, $"A storage error occured during the {operationDescription} operation.");
+            }
+            else if (e is TransferException)
+            {
+                if (CT.IsCancellationRequested)
+                {
+                    L.Info($"The {operationDescription} operation was cancelled.");
+                }
+                else
+                {
+                    L.Error(e, $"A transfer error occured during the {operationDescription} operation.");
+                }
+            }
+            else if (e is IOException)
+            {
+                L.Error(e, $"An I/O error occurred during the {operationDescription} operation.");
+            }
+        }
+
         private void Context_FileFailed(object sender, TransferEventArgs e)
         {
             if (CT.IsCancellationRequested)
@@ -445,7 +513,7 @@ namespace AzSync
             {
                 DestinationBlob = (CloudBlockBlob)e.Destination;
             }
-            L.Info("Transfer of file {file} completed in {millisec} seconds.", e.Source, (e.EndTime - e.StartTime).TotalMilliseconds);
+            L.Info("Transfer of file {file} completed in {millisec} ms.", e.Source, (e.EndTime - e.StartTime).TotalMilliseconds);
         }
 
         public static string PrintBytes(double bytes)
@@ -467,8 +535,15 @@ namespace AzSync
                 return string.Format("{0:N2} GB/s", bytes / (1024 * 1024 * 1024));
             }
             else throw new ArgumentOutOfRangeException();
-            
+
         }
+
+        public static Tuple<double, string> PrintBytesToTuple(double bytes)
+        {
+            string[] s = PrintBytes(bytes).Split(' ');
+            return new Tuple<double, string>(Double.Parse(s[0]), s[1]);
+        }
+
         #endregion
 
         #region Properties
@@ -509,9 +584,15 @@ namespace AzSync
         public bool DeleteJournal { get; protected set; }
         public Stream JournalStream { get; protected set; }
         public Task TransferTask { get; protected set; }
-        public Task SignatureTask { get; protected set; }
-        public CloudAppendBlob SignatureBlob{ get; protected set; }
-        public MemoryStream SignatureStream { get; protected set; } = new MemoryStream();
+        public CloudAppendBlob SignatureBlob { get; protected set; }
+        public Signature Signature { get; protected set; }
+        public Stream SignatureStream { get; protected set; } = new MemoryStream();
+        public string SignatureFilePath { get; protected set; }
+        public FileInfo SignatureFile { get; protected set; }
+        public Task WriteSignatureTask { get; protected set; }
+        public Task ComputeSignatureTask { get; protected set; }
+        public Task UploadSignatureTask { get; protected set; }
+
         #endregion
 
         #region Fields

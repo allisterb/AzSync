@@ -20,16 +20,15 @@ namespace AzSync
         public void ReportProgress(string operation, long currentPosition, long total)
         {
             markPosition = total / 4;
-            if (operation.StartsWith("Hashing file"))
+            if (operation.StartsWith("Hashing file") && currentPosition == 0)
             {
                 L.Info("Hashing file {file}", File.FullName);
             }
-            else if ((currentPosition >= mark * markPosition) && (currentPosition >= (mark + 1) * markPosition))
+            else if (operation.StartsWith("Building signatures") && (currentPosition >= mark * markPosition) && (currentPosition >= (mark + 1) * markPosition))
             {
                 mark++;
-                L.Info($"{operation}" + " for file {file} at current byte position {0}.", File.FullName, currentPosition);
+                L.Info("Building signature for file {file} at current byte position {0}.", File.FullName, currentPosition);
             }
-            
         }
         #endregion 
 

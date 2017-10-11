@@ -19,6 +19,7 @@ namespace AzSync
         {
             File = file;
             markPosition = file.Length / 10;
+            lastTime = DateTime.Now;
         }
         #endregion
 
@@ -37,7 +38,8 @@ namespace AzSync
             else if ((latestBytesTransferred >= mark * markPosition) && (latestBytesTransferred >= (mark + 1) * markPosition))
             {
                 ++mark;
-                L.Info("Transferred {0} bytes for 1 file. Transfer rate: {1}", latestBytesTransferred, TransferEngine.PrintBytes(latestBytesTransferred / elapsed.TotalSeconds));
+                Tuple<double, string> b = TransferEngine.PrintBytesToTuple(latestBytesTransferred / elapsed.TotalSeconds);
+                L.Info("Transferred {0} bytes for 1 file. Transfer rate: {1} {2}", latestBytesTransferred, b.Item1, b.Item2);
             }
             else if (latestNumberOfFilesTransferred == 1)
             {

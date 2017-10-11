@@ -52,7 +52,7 @@ namespace AzSync.CLI
         [Option("content-type", HelpText = "The content-type to set destination Azure Storage blobs to.")]
         public string ContentType { get; set; }
 
-        [Option('j', "journal", HelpText = "The path and name of the local transfer journal file to use during file transfers. This file is used to resume uploads or downloads that were interrupted. If you do not specify this then a default name will be used.")]
+        [Option('j', "journal-file", HelpText = "Full path and name of the local transfer journal file to use during file transfers. This file is used to resume uploads or downloads that were interrupted. If you do not specify this then a default name will be used.")]
         public string JournalFilePath { get; set; }
 
         [Option("no-journal", HelpText = "Do not use a local transfer journal during transfer. If a previous journal file for the transfer exists then it will be deleted.")]
@@ -60,6 +60,9 @@ namespace AzSync.CLI
 
         [Option("delete-journal", HelpText = "Delete any existing local transfer journal file before transfer. A new journal file for the transfer will be created unless the --no-journal option is also specified.")]
         public bool DeleteJournal { get; set; }
+
+        [Option('s', "signature-file", HelpText = "Full path and name of the local signature file to use for synchronization. During an upload if the file exists then it will be overwritten.")]
+        public string SignatureFilePath { get; protected set; }
 
     }
 

@@ -15,11 +15,10 @@ namespace AzSync
     public class SignatureUploadProgressReporter : ILogging, IProgress<TransferStatus>
     {
         #region Constructors
-        public SignatureUploadProgressReporter(SingleFileSignature signature) : base()
+        public SignatureUploadProgressReporter(FileInfo signatureFile) : base()
         {
-            Signature = signature;
-            File = signature.File;
-            markPosition = Signature.OctoSignature.Length / 10;
+            File = signatureFile;
+            markPosition = File.Length / 10;
         }
         #endregion
 
