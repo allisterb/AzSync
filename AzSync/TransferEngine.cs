@@ -161,6 +161,7 @@ namespace AzSync
         protected async Task<bool> UploadSingleFile(string fileName)
         {
             FileInfo file = new FileInfo(fileName);
+            L.Info("{file} has size {size}", file.FullName, PrintBytes(file.Length, ""));
             if (string.IsNullOrEmpty(JournalFilePath))
             {
                 JournalFilePath = file.FullName + ".azsj";
@@ -173,7 +174,7 @@ namespace AzSync
             UploadOptions options = new UploadOptions();
             SingleTransferContext context = new SingleTransferContext(JournalStream);
             context.LogLevel = LogLevel.Informational;
-            context.ProgressHandler = new SingleFileUploadProgressReporter(file);
+            context.ProgressHandler = new SingleFileTransferProgressReporter(file);
             context.SetAttributesCallback = (destination) =>
             {
                 DestinationBlob = destination as CloudBlob;
@@ -303,11 +304,12 @@ namespace AzSync
 
         protected async Task<bool> UploadSignature()
         {
+            
             UploadOptions options = new UploadOptions();
             SingleTransferContext context = new SingleTransferContext();
             bool transferred = false;
             context.LogLevel = LogLevel.Informational;
-            context.ProgressHandler = new SignatureUploadProgressReporter(SignatureFile);
+            context.ProgressHandler = new SingleFileTransferProgressReporter(SignatureFile);
             context.SetAttributesCallback = (destination) =>
             {
                 SignatureBlob = destination as CloudBlockBlob;
@@ -317,21 +319,28 @@ namespace AzSync
             {
                 return true;
             };
-            context.FileTransferred += (source, e) =>
+            context.FileTransferred += (sender, e) =>
             {
+                Context_FileTransferred(sender, e);
                 transferred = true;
             };
-            context.FileFailed += (source, e) =>
+            context.FileFailed += (sender, e) =>
             {
+                Context_FileFailed(sender, e);
                 transferred = false;
             };
-            context.FileSkipped += (source, e) =>
+            context.FileSkipped += (sender, e) =>
             {
+                Context_FileSkipped(sender, e);
                 transferred = false;
             };
 
             try
             {
+                if (await SignatureBlob.ExistsAsync())
+                {
+                    L.Warn("The existing signature blob {blob} will be overwritten.", SignatureBlob.Name);
+                }
                 await TransferManager.UploadAsync(SignatureFile.FullName, SignatureBlob, options, context, CT);
                 transferred = true; 
             }
@@ -525,31 +534,31 @@ namespace AzSync
             L.Info("Transfer of file {file} completed in {millisec} ms.", e.Source, (e.EndTime - e.StartTime).TotalMilliseconds);
         }
 
-        public static string PrintBytes(double bytes)
+        public static string PrintBytes(double bytes, string suffix)
         {
             if (bytes >= 0 && bytes <= 1024)
             {
-                return string.Format("{0:N0} B/s", bytes);
+                return string.Format("{0:N0} B{1}", bytes, suffix);
             }
             else if (bytes >= 1024 && bytes < (1024 * 1024))
             {
-                return string.Format("{0:N2} KB/s", bytes / 1024);
+                return string.Format("{0:N1} KB{1}", bytes / 1024, suffix);
             }
             else if (bytes >= (1024 * 1024) && bytes < (1024 * 1024 * 1024))
             {
-                return string.Format("{0:N2} MB/s", bytes / (1024 * 10124));
+                return string.Format("{0:N1} MB{1}", bytes / (1024 * 1024), suffix);
             }
             else if (bytes >= (1024 * 1024 * 1024))
             {
-                return string.Format("{0:N2} GB/s", bytes / (1024 * 1024 * 1024));
+                return string.Format("{0:N1} GB{1}", bytes / (1024 * 1024 * 1024), suffix);
             }
             else throw new ArgumentOutOfRangeException();
 
         }
 
-        public static Tuple<double, string> PrintBytesToTuple(double bytes)
+        public static Tuple<double, string> PrintBytesToTuple(double bytes, string suffix)
         {
-            string[] s = PrintBytes(bytes).Split(' ');
+            string[] s = PrintBytes(bytes, suffix).Split(' ');
             return new Tuple<double, string>(Double.Parse(s[0]), s[1]);
         }
 

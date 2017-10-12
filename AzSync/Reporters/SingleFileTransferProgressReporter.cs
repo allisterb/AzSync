@@ -12,13 +12,14 @@ using Microsoft.WindowsAzure.Storage.DataMovement;
 
 namespace AzSync
 {
-    public class SignatureUploadProgressReporter : ILogging, IProgress<TransferStatus>
+    public class SingleFileTransferProgressReporter : ILogging, IProgress<TransferStatus>
     {
         #region Constructors
-        public SignatureUploadProgressReporter(FileInfo signatureFile) : base()
+        public SingleFileTransferProgressReporter(FileInfo file) : base()
         {
-            File = signatureFile;
-            markPosition = File.Length / 10;
+            File = file;
+            markPosition = file.Length / 10;
+            lastTime = DateTime.Now;
         }
         #endregion
 
@@ -37,18 +38,18 @@ namespace AzSync
             else if ((latestBytesTransferred >= mark * markPosition) && (latestBytesTransferred >= (mark + 1) * markPosition))
             {
                 ++mark;
-                L.Info("Transferred {0} bytes for signature. Transfer rate: {1}", latestBytesTransferred, TransferEngine.PrintBytes(latestBytesTransferred / elapsed.TotalSeconds));
+                Tuple<double, string> b = TransferEngine.PrintBytesToTuple(latestBytesTransferred / elapsed.TotalSeconds, "/s");
+                L.Info("Transferred {0} bytes for 1 file. Transfer rate: {1} {2}", latestBytesTransferred, b.Item1, b.Item2);
             }
             else if (latestNumberOfFilesTransferred == 1)
             {
-                L.Info("Signature transfer completed.");
+                L.Info("{0} file transfer(s) completed, {1} skipped, {2} failed.", latestNumberOfFilesTransferred, latestNumberOfFilesSkipped, latestNumberOfFilesFailed);
             }
         }
         #endregion
 
         #region Fields
         protected Logger<TransferEngine> L = new Logger<TransferEngine>();
-        SingleFileSignature Signature;
         protected FileInfo File;
         private long latestBytesTransferred;
         private long latestNumberOfFilesTransferred;

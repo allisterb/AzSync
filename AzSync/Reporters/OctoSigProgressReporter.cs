@@ -19,7 +19,7 @@ namespace AzSync
         #region Methods
         public void ReportProgress(string operation, long currentPosition, long total)
         {
-            markPosition = total / 4;
+            markPosition = total / 10;
             if (operation.StartsWith("Hashing file") && currentPosition == 0)
             {
                 L.Info("Hashing file {file}", File.FullName);
