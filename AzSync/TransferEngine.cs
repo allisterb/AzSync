@@ -190,7 +190,7 @@ namespace AzSync
             try
             {
                 DestinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
-                SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.AppendBlob) as CloudAppendBlob;
+                SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.BlockBlob) as CloudBlockBlob;
                 using (Operation azOp = L.Begin("Upload file and compute file signature"))
                 {
                     Signature = new SingleFileSignature(file, DestinationBlob);
@@ -228,19 +228,26 @@ namespace AzSync
             using (Operation azOp = L.Begin("Upload and write file signature to disk"))
             {
                 SignatureFile = new FileInfo(file.FullName + ".sig");
-                WriteSignatureTask = WriteSignatureToFile();
-                UploadSignatureTask = UploadSignature();
+                WriteSignatureTask = Task.Run(() => WriteSignatureToFile(), CT);
                 try
                 {
-                    await WriteSignatureTask;
-                    if (WriteSignatureTask.IsCompleted)
+                    WriteSignatureTask.Wait();
+                    if (WriteSignatureTask.Result)
                     {
-                        await UploadSignatureTask;
-                        azOp.Complete();
+                        UploadSignatureTask = UploadSignature();
+                        if (await UploadSignatureTask)
+                        {
+                            azOp.Complete();
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
                     }
                     else
                     {
-                        azOp.Cancel();
+                        return false;
                     }
                 }
                 catch (Exception e)
@@ -251,13 +258,15 @@ namespace AzSync
                     {
                         return true;
                     }
-
+                    else
+                    {
+                        return false;
+                    }
                 }
             }
-            return true;
         }
 
-        protected async Task<bool> WriteSignatureToFile()
+        protected bool WriteSignatureToFile()
         {
             bool wrote = false;
             using (Operation azOp = L.Begin("Write signature to file {file}.", SignatureFile.FullName))
@@ -268,21 +277,13 @@ namespace AzSync
                     {
                         L.Warn("The existing signature file {file} will be overwritten.", SignatureFile.FullName);
                     }
-                    SignatureStream = SignatureFile.Open(FileMode.CreateNew, FileAccess.Write);
+                    SignatureStream = SignatureFile.Open(FileMode.Create, FileAccess.Write, FileShare.Read);
                     BinaryFormatter formatter = new BinaryFormatter();
                     formatter.Serialize(SignatureStream, Signature);
-                    await SignatureStream.FlushAsync().ContinueWith((t) =>
-                    {
-                        if (t.IsCompleted)
-                        {
-                            wrote = true;
-                        }
-                        else
-                        {
-                            wrote = false;
-                        }
-                    });
+                    SignatureStream.Flush();
+                    SignatureFile.Refresh();
                     wrote = true;
+                    azOp.Complete();
                 }
                 catch (Exception e)
                 {
@@ -309,7 +310,7 @@ namespace AzSync
             context.ProgressHandler = new SignatureUploadProgressReporter(SignatureFile);
             context.SetAttributesCallback = (destination) =>
             {
-                SignatureBlob = destination as CloudAppendBlob;
+                SignatureBlob = destination as CloudBlockBlob;
                 SignatureBlob.Properties.ContentType = "application/octet-stream";
             };
             context.ShouldOverwriteCallback = (source, destination) =>
@@ -332,7 +333,7 @@ namespace AzSync
             try
             {
                 await TransferManager.UploadAsync(SignatureFile.FullName, SignatureBlob, options, context, CT);
-                transferred = true;
+                transferred = true; 
             }
             catch (Exception e)
             {
@@ -487,6 +488,14 @@ namespace AzSync
             {
                 L.Error(e, $"An I/O error occurred during the {operationDescription} operation.");
             }
+            else if (e is SerializationException)
+            {
+                L.Error(e, $"An serialization error occurred during the {operationDescription} operation.");
+            }
+            else
+            {
+                L.Error(e, $"An unknown error occurred during the {operationDescription} operation.");
+            }
         }
 
         private void Context_FileFailed(object sender, TransferEventArgs e)
@@ -584,14 +593,14 @@ namespace AzSync
         public bool DeleteJournal { get; protected set; }
         public Stream JournalStream { get; protected set; }
         public Task TransferTask { get; protected set; }
-        public CloudAppendBlob SignatureBlob { get; protected set; }
+        public CloudBlockBlob SignatureBlob { get; protected set; }
         public Signature Signature { get; protected set; }
         public Stream SignatureStream { get; protected set; } = new MemoryStream();
         public string SignatureFilePath { get; protected set; }
         public FileInfo SignatureFile { get; protected set; }
-        public Task WriteSignatureTask { get; protected set; }
+        public Task<bool> WriteSignatureTask { get; protected set; }
         public Task ComputeSignatureTask { get; protected set; }
-        public Task UploadSignatureTask { get; protected set; }
+        public Task<bool> UploadSignatureTask { get; protected set; }
 
         #endregion
 
