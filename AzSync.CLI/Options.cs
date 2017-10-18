@@ -60,10 +60,6 @@ namespace AzSync.CLI
 
         [Option("delete-journal", HelpText = "Delete any existing local transfer journal file before transfer. A new journal file for the transfer will be created unless the --no-journal option is also specified.")]
         public bool DeleteJournal { get; set; }
-
-        [Option('s', "signature-file", HelpText = "Full path and name of the local signature file to use for synchronization. During an upload if the file exists then it will be overwritten.")]
-        public string SignatureFilePath { get; protected set; }
-
     }
 
     [Verb("copy", HelpText = "Copy files and folders between the local filesystem and Azure Storage without synchronization.")]
@@ -75,10 +71,11 @@ namespace AzSync.CLI
     [Verb("sync", HelpText = "Synchronize files and folders between the local filesystem and Azure Storage.")]
     class SyncOptions : TransferOptions
     {
-
+        [Option('s', "signature-file", HelpText = "Full path and name of the local signature file to use for synchronization. During an upload if the file exists then it will be overwritten.")]
+        public string SignatureFilePath { get; protected set; }
     }
 
-    [Verb("generate", HelpText = "Generate a file for testing AzSync with your Azure Storage account.")]
+    [Verb("gen", HelpText = "Generate a file for testing AzSync with your Azure Storage account.")]
     class GenerateOptions : Options
     {
         [Option("name", Required = true, HelpText = "The name of the test file to generate or modify.")]

@@ -37,7 +37,7 @@ namespace AzSync
                     signatureBuilder.ProgressReporter = new OctoSigProgressReporter(File);
                     signatureBuilder.Build(basisStream, octoSigWriter);
                     op.Complete();
-                    return OctoSignature = ms.ToArray();
+                    return ComputedSignature = ms.ToArray();
                 }
             }
         }

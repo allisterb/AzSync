@@ -50,7 +50,7 @@ namespace AzSync
         public string ETag;
         public long Size;
         public byte[] Hash;
-        public byte[] OctoSignature;
+        public byte[] ComputedSignature;
         #endregion
     }
 }

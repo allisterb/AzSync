@@ -61,7 +61,7 @@ namespace AzSync
             ServicePointManager.DefaultConnectionLimit = Environment.ProcessorCount * 8;
             ServicePointManager.Expect100Continue = false;
 
-            if (this.Operation == OperationType.COPY)
+            if (this.Operation == OperationType.COPY || this.Operation == OperationType.SYNC)
             {
                 Contract.Requires(!string.IsNullOrEmpty(Source) && !string.IsNullOrEmpty(Destination));
                 Contract.Requires(!(EngineOptions.ContainsKey("SourceUri") && EngineOptions.ContainsKey("DestinationUri")));
@@ -158,7 +158,106 @@ namespace AzSync
             return await Task.FromResult(true);
         }
 
+        protected async Task<bool> Download()
+        {
+            return await Task.FromResult(true);
+        }
+
+        protected async Task<bool> SyncLocalToRemote()
+        {
+            Contract.Requires(SourceFiles.Length > 0);
+            Contract.Requires(DestinationStorage != null);
+
+            if (SourceFiles.Length == 1)
+            {
+                return await SyncLocalSingleFileToRemote(SourceFiles[0]);
+            }
+            else return false;
+        }
+
+
+        protected async Task<bool> SyncRemoteToLocal()
+        {
+            return false;
+        }
+
         protected async Task<bool> UploadSingleFile(string fileName)
+        {
+            FileInfo file = new FileInfo(fileName);
+            L.Info("{file} has size {size}", file.FullName, PrintBytes(file.Length, ""));
+            if (string.IsNullOrEmpty(JournalFilePath))
+            {
+                JournalFilePath = file.FullName + ".azsj";
+            }
+            OpenTransferJournal();
+            UploadOptions options = new UploadOptions();
+            SingleTransferContext context = new SingleTransferContext(JournalStream);
+            context.LogLevel = LogLevel.Informational;
+            context.ProgressHandler = new SingleFileTransferProgressReporter(file);
+            context.SetAttributesCallback = (destination) =>
+            {
+                DestinationBlob = destination as CloudBlob;
+                DestinationBlob.Properties.ContentType = this.ContentType;
+            };
+            context.ShouldOverwriteCallback = (source, destination) =>
+            {
+                CloudBlob b = (CloudBlob)destination;
+                bool o = this.Overwrite;
+                if (o)
+                {
+                    L.Info("Overwriting existing blob {container}/{blob}.", DestinationContainerName, b.Name);
+                }
+                else
+                {
+                    L.Warn("Not overwriting existing blob {container}/{blob}.", DestinationContainerName, b.Name);
+                }
+                return o;
+            };
+            context.FileTransferred += Context_FileTransferred;
+            context.FileFailed += Context_FileFailed;
+            context.FileSkipped += Context_FileSkipped;
+            try
+            {
+                DestinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
+                using (Operation azOp = L.Begin("Upload file"))
+                {
+                    Signature = new SingleFileSignature(file, DestinationBlob);
+                    TransferTask = TransferManager.UploadAsync(file.FullName, DestinationBlob, options, context, CT);
+                    Task.WaitAll(TransferTask);
+                    if (TransferTask.Status == TaskStatus.RanToCompletion)
+                    {
+                        azOp.Complete();
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                LogTransferException(e, "upload file");
+                if (e is AggregateException && e.InnerException != null && (e.InnerException is TaskCanceledException || e.InnerException is OperationCanceledException || e.InnerException is TransferSkippedException))
+                {
+                    return true;
+                }
+                else if (e is TaskCanceledException || e is OperationCanceledException || e is TransferSkippedException)
+                {
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            finally
+            {
+                CloseTransferJournal();
+            }
+        }
+
+        protected async Task<bool> SyncLocalSingleFileToRemote(string fileName)
         {
             FileInfo file = new FileInfo(fileName);
             L.Info("{file} has size {size}", file.FullName, PrintBytes(file.Length, ""));
@@ -182,7 +281,16 @@ namespace AzSync
             };
             context.ShouldOverwriteCallback = (source, destination) =>
             {
+                CloudBlob b = (CloudBlob)destination;
                 bool o = this.Overwrite;
+                if (o)
+                {
+                    L.Info("Overwriting existing blob {container}/{blob}.", DestinationContainerName, b.Name);
+                }
+                else
+                {
+                    L.Warn("Not overwriting existing blob {container}/{blob}.", DestinationContainerName, b.Name);
+                }
                 return o;
             };
             context.FileTransferred += Context_FileTransferred;
@@ -200,7 +308,7 @@ namespace AzSync
                     Task.WaitAll(TransferTask, ComputeSignatureTask);
                     if (TransferTask.Status == TaskStatus.RanToCompletion && ComputeSignatureTask.Status == TaskStatus.RanToCompletion)
                     {
-                        L.Info("File signature has length {0} bytes.", Signature.OctoSignature.Length);
+                        L.Info("File signature has length {0} bytes.", Signature.ComputedSignature.Length);
                         azOp.Complete();
                     }
                     else
@@ -212,7 +320,11 @@ namespace AzSync
             catch (Exception e)
             {
                 LogTransferException(e, "upload file and compute file signature");
-                if (e is TaskCanceledException || e is OperationCanceledException)
+                if (e is AggregateException && e.InnerException != null && (e.InnerException is TaskCanceledException || e.InnerException is OperationCanceledException || e.InnerException is TransferSkippedException))
+                {
+                    return true;
+                }
+                else if (e is TaskCanceledException || e is OperationCanceledException || e is TransferSkippedException)
                 {
                     return true;
                 }
@@ -373,34 +485,8 @@ namespace AzSync
             return await Task.FromResult(true);
         }
 
-        protected async Task<bool> Download()
-        {
-            return await Task.FromResult(true);
-        }
-
-        protected async Task<bool> SyncLocalToRemote()
-        {
-            Contract.Requires(SourceFiles.Length > 0);
-            Contract.Requires(DestinationStorage != null);
-
-            if (SourceFiles.Length == 1)
-            {
-                return await SyncLocalSingleFileToRemote(SourceFiles[0]);
-            }
-            else return false;
-        }
-
-
-        protected async Task<bool> SyncRemoteToLocal()
-        {
-            return false;
-        }
-
+        
  
-        protected async Task<bool> SyncLocalSingleFileToRemote(string fileName)
-        {
-            return true;
-        }
 
         protected byte[] ComputeSignature(FileInfo file)
         {
@@ -474,9 +560,17 @@ namespace AzSync
 
         protected void LogTransferException(Exception e, string operationDescription)
         {
+            if (e is AggregateException && e.InnerException != null)
+            {
+                e = e.InnerException;
+            }
             if (e is TaskCanceledException || e is OperationCanceledException)
             {
                 L.Info($"The {operationDescription} operation was cancelled.");
+            }
+            else if (e is TransferSkippedException)
+            {
+                return;
             }
             else if (e is StorageException)
             {

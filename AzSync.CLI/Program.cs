@@ -47,21 +47,20 @@ namespace AzSync.CLI
 
             Console.CancelKeyPress += Console_CancelKeyPress;
 
+            LConfig = new LoggerConfiguration()
+                .Enrich.FromLogContext()
+                .Enrich.WithThreadId();
+            
             if (args.Contains("-v") || args.Contains("--verbose"))
             {
-                LConfig = new LoggerConfiguration()
-                .MinimumLevel.Verbose()
-                .Enrich.FromLogContext()
-                .Enrich.WithThreadId()
-                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] [{SourceContext}] {Message}{NewLine}{Exception}");
+                LConfig = LConfig.MinimumLevel.Verbose()
+                    .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] [{SourceContext}] {Message}{NewLine}{Exception}");
             }
             else
             {
-                LConfig = new LoggerConfiguration()
-                .MinimumLevel.Debug()
-                .Enrich.FromLogContext()
-                .Enrich.WithThreadId()
-                .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {Message}{NewLine}{Exception}");
+                LConfig = LConfig
+                    .MinimumLevel.Debug()
+                    .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss}<{ThreadId:d2}> [{Level:u3}] {Message}{NewLine}{Exception}");
             }
 
             IConfigurationBuilder builder = new ConfigurationBuilder()
@@ -76,18 +75,18 @@ namespace AzSync.CLI
             ParserResult<object> result = new Parser().ParseArguments<Options, GenerateOptions, CopyOptions, SyncOptions>(args);
             result.WithNotParsed((IEnumerable<Error> errors) =>
             {
+                HelpText help = GetAutoBuiltHelpText(result);
+                help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
+                help.Copyright = string.Empty;
+                help.AddPreOptionsLine(string.Empty);
+
                 if (errors.Any(e => e.Tag == ErrorType.VersionRequestedError))
                 {
-                    L.Info("AzSync, version {0}.", Version.ToString(4));
                     Exit(ExitResult.SUCCESS);
                 }
                 else if (errors.Any(e => e.Tag == ErrorType.HelpVerbRequestedError))
                 {
                     HelpVerbRequestedError error = (HelpVerbRequestedError)errors.First(e => e.Tag == ErrorType.HelpVerbRequestedError);
-                    HelpText help = GetAutoBuiltHelpText(result);
-                    help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
-                    help.Copyright = string.Empty;
-                    help.AddPreOptionsLine(string.Empty);
                     if (error.Type != null)
                     {
                         help.AddVerbs(error.Type);
@@ -97,38 +96,36 @@ namespace AzSync.CLI
                 }
                 else if (errors.Any(e => e.Tag == ErrorType.HelpRequestedError))
                 {
-                    HelpRequestedError error = (HelpRequestedError)errors.First(e => e.Tag == ErrorType.HelpRequestedError);
-                    HelpText help = GetAutoBuiltHelpText(result);
-                    help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
-                    help.Copyright = string.Empty;
+                    help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions), typeof(GenerateOptions));
                     L.Info(help);
                     Exit(ExitResult.SUCCESS);
                 }
                 else if (errors.Any(e => e.Tag == ErrorType.NoVerbSelectedError))
                 {
-                    NoVerbSelectedError error = (NoVerbSelectedError)errors.First(e => e.Tag == ErrorType.NoVerbSelectedError);
-                    HelpText help = GetAutoBuiltHelpText(result);
-                    help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
-                    help.Copyright = string.Empty;
                     help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions), typeof(GenerateOptions));
+                    L.Error("No operation selected. Specify one of: copy, sync, gen.");
+                    L.Info(help);
+                    Exit(ExitResult.INVALID_OPTIONS);
+                }
+                else if (errors.Any(e => e.Tag == ErrorType.MissingRequiredOptionError))
+                {
+                    MissingRequiredOptionError error = (MissingRequiredOptionError)errors.First(e => e.Tag == ErrorType.MissingRequiredOptionError);
+                    L.Error("A required option is missing: {0}.", error.NameInfo.NameText);
                     L.Info(help);
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
                 else if (errors.Any(e => e.Tag == ErrorType.UnknownOptionError))
                 {
                     UnknownOptionError error = (UnknownOptionError)errors.First(e => e.Tag == ErrorType.UnknownOptionError);
-                    HelpText help = GetAutoBuiltHelpText(result);
-                    help.Heading = new HeadingInfo("AzSync", Version.ToString(3));
-                    help.Copyright = string.Empty;
-                    L.Error("Unknown option: {error}.", error.Tag);
+                    help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions), typeof(GenerateOptions));
+                    L.Error("Unknown option: {error}.", error.Token);
                     L.Info(help);
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
                 else
                 {
-                    HelpText help = GetAutoBuiltHelpText(result);
-                    help.Copyright = string.Empty;
                     L.Error("An error occurred parsing the program options: {errors}.", errors);
+                    help.AddVerbs(typeof(SyncOptions), typeof(CopyOptions), typeof(GenerateOptions));
                     L.Info(help);
                     Exit(ExitResult.INVALID_OPTIONS);
                 }
@@ -242,75 +239,18 @@ namespace AzSync.CLI
             })
             .WithParsed((CopyOptions o) =>
             {
-                EngineOptions.Add("OperationType", TransferEngine.OperationType.COPY);
-                if (string.IsNullOrEmpty(o.Source) || string.IsNullOrEmpty(o.Destination))
-                {
-                    L.Error("You must specify both the source and destination parameters for an upload operation.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-                if (EngineOptions.ContainsKey("SourceUri") && EngineOptions.ContainsKey("DestinationUri"))
-                {
-                    L.Error("You must specify a local file or directory path and an Azure Storage location as the source/destination for an upload operation.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-
-                if (!EngineOptions.ContainsKey("SourceUri") && EngineOptions.ContainsKey("SourceFiles"))
-                {
-                    if (!EngineOptions.ContainsKey("DestinationUri") || !EngineOptions.ContainsKey("DestinationAccountName") || !EngineOptions.ContainsKey("DestinationContainerName"))
-                    {
-                        L.Error("The destination for a local filesystem copy operation must be an Azure Storage Blob Service endpoint Url.");
-                        Exit(ExitResult.INVALID_OPTIONS);
-                    }
-                    if (!EngineOptions.ContainsKey("DestinationKey"))
-                    {
-                        L.Error("You must specify the account key for accessing the destination Azure Storage location.");
-                        Exit(ExitResult.INVALID_OPTIONS);
-                    }
-
-                }
-                else if (!EngineOptions.ContainsKey("DestinationUri") && EngineOptions.ContainsKey("DestinationDirectory"))
-                {
-                    if (!EngineOptions.ContainsKey("SourceUri") || !EngineOptions.ContainsKey("SourceAccountName") || !EngineOptions.ContainsKey("SourceContainerName"))
-                    {
-                        L.Error("The source for an Azure Storage copy operation must be an Azure Storage Blob Service endpoint Url.");
-                        Exit(ExitResult.INVALID_OPTIONS);
-                    }
-                    if (!EngineOptions.ContainsKey("SourceKey"))
-                    {
-                        L.Error("You must specify the account key for accessing the source Azure Storage location.");
-                        Exit(ExitResult.INVALID_OPTIONS);
-                    }
-                }
+                EngineOptions.Add("Operation", TransferEngine.OperationType.COPY);
+                ExecuteTransferTasks();
+            })
+            .WithParsed((SyncOptions o) =>
+            {
+                EngineOptions.Add("Operation", TransferEngine.OperationType.SYNC);
                 ExecuteTransferTasks();
             })
             .WithParsed((GenerateOptions o) =>
             {
                 GenerateOptions = o;
                 ExecuteGenerateTasks();
-            })
-            .WithParsed((SyncOptions o) =>
-            {
-                o.Source = AppConfig["Source"] == string.Empty ? o.Source : AppConfig["Source"];
-                o.Destination = AppConfig["Destination"] == string.Empty ? o.Destination : AppConfig["Destination"];
-                o.SourceKey = AppConfig["SourceKey"] == string.Empty ? o.SourceKey : AppConfig["SourceKey"];
-                o.DestinationKey = AppConfig["DestKey"] == string.Empty ? o.DestinationKey : AppConfig["DestKey"];
-
-                if (string.IsNullOrEmpty(o.Source) || string.IsNullOrEmpty(o.Destination))
-                {
-                    L.Error("You must specify both the source and destination parameters for a sync operation.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-                if (o.Source.ToLower().StartsWith("https://") && string.IsNullOrEmpty(o.SourceKey))
-                {
-                    L.Error("You must specify the account key for accessing the source Azure Storage object.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-                if (o.Destination.ToLower().StartsWith("https://") && string.IsNullOrEmpty(o.DestinationKey))
-                {
-                    L.Error("You must specify the account key for accessing the destination Azure Storage object.");
-                    Exit(ExitResult.INVALID_OPTIONS);
-                }
-                ExecuteTransferTasks();
             });
         }
 
@@ -330,7 +270,7 @@ namespace AzSync.CLI
                         engineOp.Complete();
                     }
                 }
-                using (Operation engineOp = L.Begin("Azure Storage {op}", EngineOptions["OperationType"]))
+                using (Operation engineOp = L.Begin("Azure Storage {op}", EngineOptions["Operation"]))
                 {
                     if (await Engine.Transfer())
                     {
