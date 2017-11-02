@@ -7,10 +7,10 @@ using Octodiff.Diagnostics;
 
 namespace AzSync
 {
-    public class OctoSigProgressReporter : IProgressReporter, ILogging
+    public class OctoSigBuildProgressReporter : IProgressReporter, ILogging
     {
         #region Constructors
-        public OctoSigProgressReporter(FileInfo file)
+        public OctoSigBuildProgressReporter(FileInfo file)
         {
             File = file;
         }
@@ -33,7 +33,7 @@ namespace AzSync
         #endregion 
 
         #region Fields
-        protected Logger<OctoSigProgressReporter> L = new Logger<OctoSigProgressReporter>();
+        protected Logger<OctoSigBuildProgressReporter> L = new Logger<OctoSigBuildProgressReporter>();
         protected FileInfo File;
         int mark = 0;
         long markPosition;

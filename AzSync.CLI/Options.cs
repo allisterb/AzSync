@@ -16,10 +16,10 @@ namespace AzSync.CLI
 
     class TransferOptions : Options
     {
-        [Option('s', "source", HelpText = "The Azure Storage resource or local directory that will be the sync source. For an Azure Storage resource you must use your Blob Service endpoint Uri.")]
+        [Option('s', "source", Required = true, HelpText = "The Azure Storage resource or local directory that will be the sync source. For an Azure Storage resource you must use your Blob Service endpoint Uri.")]
         public string Source { get; set; }
 
-        [Option('d', "dest", HelpText = "The Azure Storage resource or local directory that will be the sync destination. Use a single directory name if specifying a local sync destination. For an Azure Storage resource you must use your Blob Service endpoint Uri.")]
+        [Option('d', "dest", Required = true, HelpText = "The Azure Storage resource or local directory that will be the sync destination. Use a single directory name if specifying a local sync destination. For an Azure Storage resource you must use your Blob Service endpoint Uri.")]
         public string Destination { get; set; }
 
         [Option('p', "pattern", HelpText = "The pattern to match file names against in the sync source or destination. Use the standard OS wildcards for local file or directory names if specifying a local sync source.", Default = "*")]
@@ -71,8 +71,14 @@ namespace AzSync.CLI
     [Verb("sync", HelpText = "Synchronize files and folders between the local filesystem and Azure Storage.")]
     class SyncOptions : TransferOptions
     {
-        [Option('s', "signature-file", HelpText = "Full path and name of the local signature file to use for synchronization. During an upload if the file exists then it will be overwritten.")]
+        [Option("remote-signature", Default = false, HelpText = "Use a Azure Storage blob signature for synchronization instead of a local file signature.")]
+        public bool UseRemoteSignature { get; protected set; }
+
+        [Option('s', "signature-file", HelpText = "Full path and name of the local file signature to use for synchronization. During an upload if thise file exists then it will be overwritten.")]
         public string SignatureFilePath { get; protected set; }
+
+        [Option('B', "signature-blob", HelpText = "The name of the Azure Storage blob signature to use for synchronization.")]
+        public string SignatureBlobName { get; protected set; }
     }
 
     [Verb("gen", HelpText = "Generate a file for testing AzSync with your Azure Storage account.")]

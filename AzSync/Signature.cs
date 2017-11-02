@@ -17,13 +17,19 @@ namespace AzSync
     public abstract class Signature : ILogging
     {
         #region Constructors
-        public Signature(DirectoryInfo source, string pattern, string[] sourceFiles, CloudBlob blob)
+        public Signature(DirectoryInfo source, string pattern, string[] sourceFiles)
         {
             Source = source;
             Pattern = pattern;
             SourceFiles = sourceFiles;
-            Blob = blob;
-            ETag = blob.Properties.ETag;
+        }
+        public Signature(DirectoryInfo source, string pattern, string[] sourceFiles, CloudBlob blob = null) : this(source, pattern, sourceFiles)
+        {
+            if (blob != null)
+            {
+                Blob = blob;
+                ETag = blob.Properties.ETag;
+            }
         }
         #endregion
 
@@ -51,6 +57,7 @@ namespace AzSync
         public long Size;
         public byte[] Hash;
         public byte[] ComputedSignature;
+        public DateTime ComputedDateTime;
         #endregion
     }
 }

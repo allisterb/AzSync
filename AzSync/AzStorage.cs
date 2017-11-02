@@ -75,16 +75,55 @@ namespace AzSync
             }
             return rn.ToString();
         }
-        
+
+        public async Task<ICloudBlob> GetCloudBlobAsync(string containerName, string blobName, DateTimeOffset? snapshotTime = null)
+        {
+            using (Operation azOp = L.Begin("Get Azure Storage blob {0}/{1}", containerName, blobName))
+            {
+                try
+                {
+                    GetCloudBlobClient();
+                    CloudBlobContainer Container = BlobClient.GetContainerReference(containerName);
+                    ICloudBlob cloudBlob = await Container.GetBlobReferenceFromServerAsync(blobName);
+                    azOp.Complete();
+                    return cloudBlob;
+                }
+                catch (StorageException se)
+                {
+                    if (RethrowExceptions)
+                    {
+                        throw se;
+                    }
+                    else
+                    {
+                        L.Error(se, "A storage error occurred getting Azure Storage blob {bn} in container {cn}.", blobName, containerName);
+                        return null;
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (RethrowExceptions)
+                    {
+                        throw e;
+                    }
+                    else
+                    {
+                        L.Error(e, "An error occurred getting Azure Storage blob {bn} from container {cn}.", blobName, containerName);
+                        return null;
+                    }
+                }
+            }
+        }
+
         public async Task<CloudBlob> GetorCreateCloudBlobAsync(string containerName, string blobName, BlobType blobType, DateTimeOffset? snapshotTime = null)
-        { using (Operation azOp = L.Begin("Get Azure Storage blob {0}/{1}", containerName, blobName))
+        {
+            using (Operation azOp = L.Begin("Get Azure Storage blob {0}/{1}", containerName, blobName))
             {
                 try
                 {
                     GetCloudBlobClient();
                     CloudBlobContainer Container = BlobClient.GetContainerReference(containerName);
                     await Container.CreateIfNotExistsAsync();
-
                     CloudBlob cloudBlob;
                     switch (blobType)
                     {

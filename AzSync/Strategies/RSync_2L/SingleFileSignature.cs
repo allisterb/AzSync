@@ -10,6 +10,7 @@ using Microsoft.WindowsAzure.Storage.Blob;
 using Serilog;
 using SerilogTimings;
 using Octodiff.Core;
+using Octodiff.Diagnostics;
 
 namespace AzSync
 {
@@ -17,10 +18,15 @@ namespace AzSync
     public class SingleFileSignature : Signature
     {
         #region Constructors
-        public SingleFileSignature(FileInfo file, CloudBlob blob) : base(file.Directory, file.Name, new string[] { file.Name }, blob)
+        public SingleFileSignature(FileInfo file, CloudBlob blob = null) : base(file.Directory, file.Name, new string[] { file.Name }, blob)
         {
             File = file;
             Size = File.Length;
+        }
+
+        public SingleFileSignature(Signature signature) : base(signature.Source, signature.Pattern, signature.SourceFiles, signature.Blob)
+        {
+            
         }
         #endregion
 
@@ -34,8 +40,9 @@ namespace AzSync
                 {
                     SignatureWriter octoSigWriter = new SignatureWriter(ms);
                     SignatureBuilder signatureBuilder = new SignatureBuilder();
-                    signatureBuilder.ProgressReporter = new OctoSigProgressReporter(File);
+                    signatureBuilder.ProgressReporter = new OctoSigBuildProgressReporter(File);
                     signatureBuilder.Build(basisStream, octoSigWriter);
+                    ComputedDateTime = DateTime.UtcNow;
                     op.Complete();
                     return ComputedSignature = ms.ToArray();
                 }
@@ -46,6 +53,7 @@ namespace AzSync
         #region Fields
         [NonSerialized]
         public FileInfo File;
+        
         #endregion
     }
 }
