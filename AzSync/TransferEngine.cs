@@ -193,19 +193,56 @@ namespace AzSync
             else return false;
         }
 
+        protected async Task<bool> SyncLocalSingleFileToRemote(string fileName)
+        {
+            FileInfo file = new FileInfo(fileName);
+            if (UseRemoteSignature)
+            {
+                if (string.IsNullOrEmpty(SignatureBlobName))
+                {
+                    SignatureBlobName = file.Name + ".sig";
+                }
+                if (!await GetSignatureBlobForTransfer())
+                {
+                    return false;
+                }
+            }
+            else if (UseLocalSignature)
+            {
+                if (!GetSignatureFileForTransfer())
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                SignatureFilePath = file.FullName + ".sig";
+                if (!GetSignatureFileForTransfer())
+                {
+                    L.Warn("Could not use local signature file for synchronization. Uploading without synchronization.");
+                    return await UploadSingleFile(fileName, true);
+                }
+            }
+            return false;
+        }
+
 
         protected async Task<bool> SyncRemoteToLocal()
         {
             return false;
         }
 
-        protected async Task<bool> UploadSingleFile(string fileName)
+        protected async Task<bool> UploadSingleFile(string fileName, bool writeSignature = false)
         {
             FileInfo file = new FileInfo(fileName);
             L.Info("{file} has size {size}", file.FullName, PrintBytes(file.Length, ""));
             if (string.IsNullOrEmpty(JournalFilePath))
             {
                 JournalFilePath = file.FullName + ".azsj";
+            }
+            if (writeSignature && string.IsNullOrEmpty(SignatureFilePath))
+            {
+                SignatureFilePath = file.FullName + ".sig";   
             }
             OpenTransferJournal();
             UploadOptions options = new UploadOptions();
@@ -237,20 +274,46 @@ namespace AzSync
             try
             {
                 DestinationBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, file.Name, BlobType.BlockBlob);
+                if (writeSignature)
+                {
+                    Signature = new SingleFileSignature(file, DestinationBlob);
+                    ComputeSignatureTask = Task.Factory.StartNew(() => Signature.Compute(), CT, TaskCreationOptions.None, TaskScheduler.Default);
+                }
+                else
+                {
+                    ComputeSignatureTask = Task.CompletedTask;
+                }
                 using (Operation azOp = L.Begin("Upload file"))
                 {
                     TransferTask = TransferManager.UploadAsync(file.FullName, DestinationBlob, options, context, CT);
-                    Task.WaitAll(TransferTask);
+                    Task.WaitAll(TransferTask, ComputeSignatureTask);
                     if (TransferTask.Status == TaskStatus.RanToCompletion)
                     {
-                        azOp.Complete();
-                        return true;
+                        if (!writeSignature)
+                        {
+                            azOp.Complete();
+                            return true;
+                        }
+                        else
+                        {
+                            azOp.Complete();
+                        }
                     }
                     else
                     {
                         return false;
                     }
+                    if (writeSignature && ComputeSignatureTask.Status == TaskStatus.RanToCompletion)
+                    {
+                        L.Info("Compute file signature has length {0} bytes.", Signature.ComputedSignature.Length);
+                    }
+                    else if (writeSignature)
+                    {
+                        L.Error("Could not compute signature for file {file}.", file.FullName);
+                        return false;
+                    }
                 }
+
             }
             catch (Exception e)
             {
@@ -272,51 +335,47 @@ namespace AzSync
             {
                 CloseTransferJournal();
             }
+
+            using (Operation azOp = L.Begin("Upload and write file signature to disk"))
+            {
+                WriteSignatureTask = Task.Run(() => WriteSignatureToFile(), CT);
+                try
+                {
+                    WriteSignatureTask.Wait();
+                    if (WriteSignatureTask.Result)
+                    {
+                        UploadSignatureTask = UploadSignature();
+                        if (await UploadSignatureTask)
+                        {
+                            azOp.Complete();
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                catch (Exception e)
+                {
+                    LogTransferException(e, "upload and write file signature to disk");
+                    azOp.Cancel();
+                    if (e is TaskCanceledException || e is OperationCanceledException)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            }
         }
 
-        protected async Task<bool> SyncLocalSingleFileToRemote(string fileName)
-        {
-            FileInfo file = new FileInfo(fileName);
-            if (UseRemoteSignature)
-            {
-                if (string.IsNullOrEmpty(SignatureBlobName))
-                {
-                    SignatureBlobName = file.Name + ".sig";
-                }
-                if (!await GetBlobSignatureForTransfer())
-                {
-                    L.Error("Could not use Azure Storage signature blob {blob} for synchronization.", SignatureBlobName);
-                    return false;
-                }
-            }
-            else if (UseLocalSignature)
-            {
-                if (!GetSignatureFileForTransfer())
-                {
-                    L.Error("Could not use local signature file {file} for synchronization.", SignatureFilePath);
-                    return false;
-                }
-                else
-                {
-                    L.Info("{file} has size {size}", file.FullName, PrintBytes(file.Length, ""));
-                }
-
-            }
-            else
-            {   
-                SignatureFilePath = file.FullName + ".sig";
-                if (!GetSignatureFileForTransfer())
-                {
-                    L.Error("Could not use local signature file {file} for synchronization. Uploading without synchronization.", SignatureFilePath);
-                    return await UploadSingleFile(fileName);
-                }
-                else
-                {
-                    L.Info("{file} has size {size}", file.FullName, PrintBytes(file.Length, ""));
-                }
-            }
-            return false;
-        }
         protected bool GetSignatureFileForTransfer()
         {
             try
@@ -332,7 +391,15 @@ namespace AzSync
                             IFormatter formatter = new BinaryFormatter();
                             Signature = (SingleFileSignature)formatter.Deserialize(fs);
                             ComputeSignatureTask = Task.CompletedTask;
-                            L.Info("Using local file signature {file} for synchronization with signature built on {date}.", SignatureFile.FullName, Signature.ComputedDateTime);
+                            L.Info("Using local file signature {file} for synchronization with signature built on {date} on computer {c} by user {u}.", 
+                                SignatureFile.FullName, Signature.ComputedDateTime, Signature.ComputerName, Signature.UserName);
+                            string sf1 = string.Join(",", SourceFiles);
+                            string sf2 = string.Join(",", Signature.SourceFiles);
+                            if (sf1 != sf2)
+                            {
+                                L.Error("This signature's source files do not match the current transfer's source files.");
+                                return false;
+                            }
                             return true;
                         }
                     }
@@ -340,6 +407,7 @@ namespace AzSync
                 }
                 else
                 {
+                    L.Info("Local file signature {file} does not exist.", SignatureFilePath);
                     return false;
                 }
             }
@@ -355,7 +423,7 @@ namespace AzSync
             }
         }
 
-        protected async Task<bool> GetBlobSignatureForTransfer()
+        protected async Task<bool> GetSignatureBlobForTransfer()
         {
             DownloadOptions options = new DownloadOptions();
             SingleTransferContext context = new SingleTransferContext();
@@ -421,6 +489,7 @@ namespace AzSync
             {
                 try
                 {
+                    SignatureFile = new FileInfo(SignatureFilePath);
                     if (SignatureFile.Exists)
                     {
                         L.Warn("The existing signature file {file} will be overwritten.", SignatureFile.FullName);
@@ -451,7 +520,6 @@ namespace AzSync
 
         protected async Task<bool> UploadSignature()
         {
-            
             UploadOptions options = new UploadOptions();
             SingleTransferContext context = new SingleTransferContext();
             bool transferred = false;
@@ -484,6 +552,7 @@ namespace AzSync
 
             try
             {
+                SignatureBlob = await DestinationStorage.GetorCreateCloudBlobAsync(DestinationContainerName, DestinationBlob.Name + ".sig", BlobType.BlockBlob) as CloudBlockBlob;
                 if (await SignatureBlob.ExistsAsync())
                 {
                     L.Warn("The existing signature blob {blob} will be overwritten.", SignatureBlob.Name);

@@ -74,7 +74,7 @@ namespace AzSync.CLI
         [Option("remote-signature", Default = false, HelpText = "Use a Azure Storage blob signature for synchronization instead of a local file signature.")]
         public bool UseRemoteSignature { get; protected set; }
 
-        [Option('s', "signature-file", HelpText = "Full path and name of the local file signature to use for synchronization. During an upload if thise file exists then it will be overwritten.")]
+        [Option('f', "signature-file", HelpText = "Full path and name of the local file signature to use for synchronization. During an upload if thise file exists then it will be overwritten.")]
         public string SignatureFilePath { get; protected set; }
 
         [Option('B', "signature-blob", HelpText = "The name of the Azure Storage blob signature to use for synchronization.")]

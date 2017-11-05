@@ -173,6 +173,17 @@ namespace AzSync.CLI
                         if (Directory.Exists(o.Source))
                         {
                             EngineOptions.Add("SourceDirectory", new DirectoryInfo(o.Source));
+                            string[] files = Directory.GetFiles(o.Source, o.Pattern, o.Recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
+                            L.Info("Matched {0} file(s) to pattern {1} in directory {2}.", files.Length, o.Pattern, o.Source);
+                            if (files.Length > 0)
+                            {
+                                EngineOptions.Add("SourceFiles", files);
+                            }
+                            else
+                            {
+                                L.Warn("Nothing to do, exiting.");
+                                Exit(ExitResult.SUCCESS);
+                            }
                         }
                         else
                         {
@@ -182,20 +193,10 @@ namespace AzSync.CLI
                     }
                     catch (IOException ioe)
                     {
-                        L.Error(ioe, "A storage error occurred  attempting to find local directory {d}.", o.Source);
+                        L.Error(ioe, "A storage error occurred attempting to find or access local directory {d}.", o.Source);
                         Exit(ExitResult.FILE_OR_DIRECTORY_NOT_FOUND);
                     }
-                    string[] files = Directory.GetFiles(o.Source, o.Pattern, o.Recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-                    L.Info("Matched {0} file(s) to pattern {1} in directory {2}.", files.Length, o.Pattern, o.Source);
-                    if (files.Length > 0)
-                    {
-                        EngineOptions.Add("SourceFiles", files);
-                    }
-                    else
-                    {
-                        L.Warn("Nothing to do, exiting.");
-                        Exit(ExitResult.SUCCESS);
-                    }
+
                 }
 
                 if (!string.IsNullOrEmpty(o.Destination) && (o.Destination.StartsWith("http://") || o.Destination.StartsWith("https://")) && Uri.TryCreate(o.Destination, UriKind.Absolute, out Uri destinationUri))
